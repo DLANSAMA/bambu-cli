@@ -130,6 +130,9 @@ def iter_files(include_dist=False):
     for dirpath, dirnames, filenames in os.walk(ROOT):
         dirnames[:] = [name for name in dirnames if name not in excluded_dirs]
         for filename in filenames:
+            if filename == ".git":
+                # In a git worktree, .git is a file pointing at the local checkout path.
+                continue
             path = Path(dirpath) / filename
             if path.is_symlink() or not path.is_file():
                 continue

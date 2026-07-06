@@ -337,7 +337,7 @@ def cmd_upload(args):
                         logger.info(f"🔄 Resuming from {uploaded_bytes // 1024}KB...")
                         f.seek(uploaded_bytes)
                     try:
-                        if not getattr(args, "json", False):
+                        if not getattr(args, "json", False) and getattr(args, "progress", True):
                             from rich.progress import Progress, DownloadColumn, TransferSpeedColumn, TimeRemainingColumn
                             progress = Progress(
                                 "[progress.description]{task.description}",
