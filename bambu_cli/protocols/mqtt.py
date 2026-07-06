@@ -108,10 +108,10 @@ def probe_cert_fingerprint(host, port=990, timeout=5):
 
 
 
-def create_mqtt_client(client_id=""):
+def create_mqtt_client(printer, client_id=""):
     from bambu_cli import bambu
     global _TRUSTED_CERT_FILE
-    if bambu.SIMULATION_MODE:
+    if printer.simulation_mode:
         return _SimMqttClient()
 
     _require_mqtt()
@@ -119,13 +119,13 @@ def create_mqtt_client(client_id=""):
         client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id)
     except AttributeError:
         client = mqtt.Client(client_id)
-    client.username_pw_set(bambu.load_username(), bambu.load_access_code())
+    client.username_pw_set("bblp", printer.access_code)
     
-    if bambu.INSECURE_TLS:
+    if printer.insecure_tls:
         client.tls_set(cert_reqs=ssl.CERT_NONE)
         client.tls_insecure_set(True)
-    elif bambu._expected_fingerprint():
-        expected_fp = bambu._expected_fingerprint().lower()
+    elif printer.cert_fingerprint:
+        expected_fp = printer.cert_fingerprint.lower()
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
@@ -147,36 +147,36 @@ def create_mqtt_client(client_id=""):
         client.tls_set(cert_reqs=ssl.CERT_REQUIRED)
     return client
 
-def _mqtt_connect(client):
+def _mqtt_connect(printer, client):
     from bambu_cli import bambu
-    resolved_ip = bambu._resolve_ip(bambu.PRINTER_IP)
+    resolved_ip = _resolve_ip(printer.ip)
     old_timeout = socket.getdefaulttimeout()
     try:
         # timeout mutation fixed by explicit client connect keepalive logic elsewhere, but retaining for compatibility
-        client.connect(resolved_ip, bambu.MQTT_PORT, keepalive=10)
+        client.connect(resolved_ip, 8883, keepalive=10)
     finally:
         socket.setdefaulttimeout(old_timeout)
 
 @mockable
-def send_command(payload, timeout=None, retries=2):
+def send_command(printer, payload, timeout=None, retries=2):
     """Send a command to the printer with retries."""
     from bambu_cli import bambu
     if timeout is None:
-        timeout = bambu.get_command_timeout()
+        timeout = printer.mqtt_timeout
 
-    if bambu.SIMULATION_MODE:
+    if printer.simulation_mode:
         logger.info(f"🤖 [SIM] Sending command: {payload}")
         return True
 
     for attempt in range(retries + 1):
-        client = bambu.create_mqtt_client()
+        client = create_mqtt_client(printer)
         client.user_data_set({})
         publish_done = threading.Event()
         success = [False]
 
         def on_connect(client, userdata, flags, rc, properties=None):
             if rc == 0:
-                client.publish(f"device/{bambu.SERIAL}/request", payload)
+                client.publish(f"device/{printer.serial}/request", payload)
             else:
                 logger.error(f"Connection failed: rc={rc}")
                 publish_done.set()
@@ -189,7 +189,7 @@ def send_command(payload, timeout=None, retries=2):
         client.on_publish = on_publish
 
         try:
-            bambu._mqtt_connect(client)
+            _mqtt_connect(printer, client)
             client.loop_start()
             try:
                 if publish_done.wait(timeout):
@@ -218,14 +218,13 @@ def send_command(payload, timeout=None, retries=2):
 
 
 @mockable
-def get_status(timeout=None, retries=2):
+def get_status(printer, timeout=None, retries=2):
     """Get printer status via MQTT with retries."""
     from bambu_cli import bambu
     if timeout is None:
-        # Default network timeout is 8 here historically
-        timeout = 8.0
+        timeout = printer.mqtt_timeout
 
-    if bambu.SIMULATION_MODE:
+    if printer.simulation_mode:
         logger.info("🤖 [SIM] Fetching simulated printer status...")
         return {
             "gcode_state": "IDLE",
@@ -239,14 +238,14 @@ def get_status(timeout=None, retries=2):
     for attempt in range(retries + 1):
         result = {"data": None}
         status_received = threading.Event()
-        client = bambu.create_mqtt_client()
+        client = create_mqtt_client(printer)
         client.user_data_set({})
 
         def on_connect(client, userdata, flags, rc, properties=None):
             if rc == 0:
-                client.subscribe(f"device/{bambu.SERIAL}/report")
+                client.subscribe(f"device/{printer.serial}/report")
                 push = json.dumps({"pushing": {"sequence_id": get_sequence_id(), "command": "pushall"}})
-                client.publish(f"device/{bambu.SERIAL}/request", push)
+                client.publish(f"device/{printer.serial}/request", push)
             else:
                 logger.error(f"Connection failed: rc={rc}")
                 status_received.set()
@@ -264,7 +263,7 @@ def get_status(timeout=None, retries=2):
         client.on_message = on_message
 
         try:
-            bambu._mqtt_connect(client)
+            _mqtt_connect(printer, client)
             client.loop_start()
             try:
                 if status_received.wait(timeout):
@@ -292,22 +291,22 @@ def get_status(timeout=None, retries=2):
 
 
 @mockable
-def get_version(timeout=5, retries=1):
+def get_version(printer, timeout=5, retries=1):
     """Fetch printer module versions via the MQTT get_version command."""
     from bambu_cli import bambu
-    if bambu.SIMULATION_MODE:
+    if printer.simulation_mode:
         return [{"name": "ota", "sw_ver": "01.00.00.00", "hw_ver": "P1P-SIM"}]
 
     for attempt in range(retries + 1):
         result = {"modules": None}
         received = threading.Event()
-        client = bambu.create_mqtt_client()
+        client = create_mqtt_client(printer)
         client.user_data_set({})
 
         def on_connect(client, userdata, flags, rc, properties=None):
             if rc == 0:
-                client.subscribe(f"device/{bambu.SERIAL}/report")
-                client.publish(f"device/{bambu.SERIAL}/request",
+                client.subscribe(f"device/{printer.serial}/report")
+                client.publish(f"device/{printer.serial}/request",
                                json.dumps({"info": {"sequence_id": get_sequence_id(), "command": "get_version"}}))
             else:
                 logger.error(f"Connection failed: rc={rc}")
@@ -327,7 +326,7 @@ def get_version(timeout=5, retries=1):
         client.on_message = on_message
 
         try:
-            bambu._mqtt_connect(client)
+            _mqtt_connect(printer, client)
             client.loop_start()
             try:
                 if received.wait(timeout):

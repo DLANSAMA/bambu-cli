@@ -68,7 +68,6 @@ def _verify_cert_fingerprint(der_cert, host):
 class ImplicitFTPS(ftplib.FTP_TLS):
     """FTP_TLS subclass for implicit FTPS (Bambu printers use port 990)."""
     def connect(self, host='', port=990, timeout=-999, source_address=None):
-        from bambu_cli import bambu
         if host != '': self.host = host
         if port > 0: self.port = port
         if timeout != -999: self.timeout = timeout
@@ -76,8 +75,8 @@ class ImplicitFTPS(ftplib.FTP_TLS):
         self.af = self.sock.family
         try:
             ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-            pin = bambu._expected_fingerprint()
-            if pin or bambu.INSECURE_TLS:
+            pin = getattr(self, 'printer', None) and self.printer.cert_fingerprint
+            if pin or (getattr(self, 'printer', None) and self.printer.insecure_tls):
                 ctx.check_hostname = False
                 ctx.verify_mode = ssl.CERT_NONE
             else:
@@ -86,7 +85,9 @@ class ImplicitFTPS(ftplib.FTP_TLS):
                 ctx.load_default_certs()
             self.sock = ctx.wrap_socket(self.sock, server_hostname=self.host)
             if pin:
-                _verify_cert_fingerprint(self.sock.getpeercert(binary_form=True), self.host)
+                actual = hashlib.sha256(self.sock.getpeercert(binary_form=True)).hexdigest().lower()
+                if actual != pin.lower():
+                    raise ssl.SSLError(f"Certificate fingerprint mismatch: expected {pin.lower()}, got {actual}")
             self.file = self.sock.makefile('r', encoding=self.encoding)
             self.welcome = self.getresp()
         except Exception:
@@ -103,7 +104,6 @@ class ImplicitFTPS(ftplib.FTP_TLS):
         return self.welcome
 
     def ntransfercmd(self, cmd, rest=None):
-        from bambu_cli import bambu
         conn, size = ftplib.FTP.ntransfercmd(self, cmd, rest)
         secure = getattr(self, "_secure_data", False) or getattr(self, "_prot_p", False)
         if secure:
@@ -112,9 +112,11 @@ class ImplicitFTPS(ftplib.FTP_TLS):
                 conn = self.sock.context.wrap_socket(conn,
                                                      server_hostname=self.host,
                                                      session=session)
-                pin = bambu._expected_fingerprint()
+                pin = getattr(self, 'printer', None) and self.printer.cert_fingerprint
                 if pin:
-                    _verify_cert_fingerprint(conn.getpeercert(binary_form=True), self.host)
+                    actual = hashlib.sha256(conn.getpeercert(binary_form=True)).hexdigest().lower()
+                    if actual != pin.lower():
+                        raise ssl.SSLError(f"Certificate fingerprint mismatch: expected {pin.lower()}, got {actual}")
         return conn, size
 
 
@@ -256,18 +258,21 @@ connection_manager = ConnectionManager()
 atexit.register(connection_manager.close_all)
 
 
-def _create_raw_ftp(timeout=60):
+def _create_raw_ftp(printer, timeout=60):
     """Connect to printer's FTPS server."""
-    from bambu_cli import bambu
-    if bambu.SIMULATION_MODE:
+    if printer.simulation_mode:
+        from bambu_cli.logging_utils import logger
         logger.info("🤖 [SIM] Connecting to simulated FTPS server...")
         return _SimFtp()
 
-    resolved_ip = _resolve_ip(bambu.PRINTER_IP)
-    implicit_ftps_class = getattr(bambu, "ImplicitFTPS", ImplicitFTPS)
-    ftp = implicit_ftps_class()
+    resolved_ip = _resolve_ip(printer.ip)
+    ftp = ImplicitFTPS()
+    
+    # Store settings for use in connect/ntransfercmd
+    ftp.printer = printer
+    
     ftp.connect(resolved_ip, 990, timeout=timeout)
-    ftp.login(bambu.load_username(), bambu.load_access_code())
+    ftp.login("bblp", printer.access_code)
     ftp.prot_p()
     return ftp
 
