@@ -8,6 +8,8 @@ Fully local 3D printing pipeline for Bambu Lab printers. Runs on **Linux, macOS,
 
 **Supports:** P1P, P1S, X1C, X1E, A1, A1 Mini (any Bambu printer with LAN mode)
 
+> **Disclaimer:** bambu-cli is an unofficial, community-developed tool. It is not affiliated with, endorsed by, or supported by Bambu Lab. "Bambu Lab" and product names are trademarks of their respective owners, used here only to describe compatibility.
+
 ## Installation
 
 The examples below use the installed `bambu-cli` command.

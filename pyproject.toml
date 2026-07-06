@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "bambu-cli"
 version = "0.1.0"
-description = "Local Bambu Lab printer control for agents and humans"
+description = "Unofficial local Bambu Lab printer control for agents and humans (not affiliated with Bambu Lab)"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
