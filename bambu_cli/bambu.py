@@ -1406,6 +1406,19 @@ def _cmd_setup(args):
     _validate_setup_access_code_file(args, access_code_file)
 
     try:
+        from bambu_cli.protocols.mqtt import probe_cert_fingerprint
+        logger.info("🔒 Fetching printer TLS certificate fingerprint...")
+        # Assumes the printer serves the same certificate on ports 8883 (MQTT),
+        # 990 (FTPS), and 6000 (camera) — true for Bambu firmware to date.
+        cert_fingerprint = probe_cert_fingerprint(ip, 8883, timeout=5)
+        logger.info(f"   Fingerprint: {cert_fingerprint}")
+        logger.info("   (trust-on-first-use: verify this matches your printer if on an untrusted network)")
+    except Exception as e:
+        logger.warning(f"⚠️  Could not fetch TLS certificate: {e}")
+        logger.warning("   Connections may fail if the fingerprint is required.")
+        cert_fingerprint = None
+
+    try:
         config = _build_setup_config(
             ip=ip,
             serial=serial,
@@ -1415,6 +1428,7 @@ def _cmd_setup(args):
             access_code_file=access_code_file,
             orca_slicer=_DEFAULT_ORCA,
             profiles_dir=_DEFAULT_PROFILES,
+            cert_fingerprint=cert_fingerprint,
         )
     except ValueError as exc:
         message = str(exc)
@@ -1621,21 +1635,21 @@ def _cmd_preflight(args):
 
 
 
-def _grab_camera_frame_direct(ip, access_code, username="bblp", timeout=12):
+def _grab_camera_frame_direct(printer, timeout=12):
     """Grab one JPEG frame from a P1/A1 printer camera using Bambu's native TLS
     port-6000 protocol (the same one Bambu Studio uses). Returns JPEG bytes, or
     None if no frame is obtained. Requires no Docker. X1-series use RTSP instead,
     so callers should fall back to the Docker/RTSP streamer when this returns None."""
     import socket, ssl, struct
-    if not ip or not access_code:
+    if not printer.ip or not printer.access_code:
         return None
     auth = bytearray()
     auth += struct.pack("<I", 0x40)
     auth += struct.pack("<I", 0x3000)
     auth += struct.pack("<I", 0x0)
     auth += struct.pack("<I", 0x0)
-    auth += username.encode("ascii").ljust(32, b"\x00")
-    auth += access_code.encode("ascii").ljust(32, b"\x00")
+    auth += "bblp".encode("ascii").ljust(32, b"\x00")
+    auth += printer.access_code.encode("ascii").ljust(32, b"\x00")
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
@@ -1649,10 +1663,21 @@ def _grab_camera_frame_direct(ip, access_code, username="bblp", timeout=12):
             buf += c
         return buf
 
-    sock = socket.create_connection((ip, 6000), timeout=timeout)
+    sock = socket.create_connection((printer.ip, 6000), timeout=timeout)
     try:
-        tls = ctx.wrap_socket(sock, server_hostname=ip)
+        tls = ctx.wrap_socket(sock, server_hostname=printer.ip)
         tls.settimeout(timeout)
+        
+        # TLS Verification
+        if not printer.insecure_tls and printer.cert_fingerprint:
+            der = tls.getpeercert(binary_form=True)
+            from bambu_cli.config import fingerprint_sha256
+            actual = fingerprint_sha256(der)
+            if actual.lower() != printer.cert_fingerprint.lower():
+                raise ssl.SSLError(f"Certificate fingerprint mismatch: expected {printer.cert_fingerprint}, got {actual}")
+        elif not printer.insecure_tls and not printer.cert_fingerprint:
+            raise ssl.SSLError("No cert_fingerprint pinned for camera connection; run 'bambu-cli setup' to pin one, or set insecure_tls to bypass (not recommended)")
+
         tls.sendall(bytes(auth))
         for _ in range(30):
             hdr = _recv_exact(tls, 16)
@@ -1704,7 +1729,9 @@ def _cmd_snapshot(args):
     # --- Primary path: direct P1/A1 camera grab (no Docker). Falls through to the
     #     Docker/RTSP streamer below for X1-series or if no frame is obtained. ---
     try:
-        _frame = _grab_camera_frame_direct(PRINTER_IP, load_access_code())
+        from bambu_cli.printer import get_printer
+        printer = get_printer()
+        _frame = _grab_camera_frame_direct(printer)
     except Exception as _exc:
         _frame = None
         logger.debug(f"Direct camera grab unavailable ({_exc}); trying Docker streamer.")
@@ -2343,7 +2370,8 @@ def _cmd_job(args):
 
         try:
             _LAST_ERROR_PAYLOAD = None
-            remote_name = cmd_upload(argparse.Namespace(file=printable_path, dry_run=False, json=False))
+            remote_name = cmd_upload(argparse.Namespace(file=printable_path, dry_run=False, json=False,
+                                                        no_progress=bool(getattr(args, 'json', False))))
         except SystemExit as exc:
             detail = _last_error_for("upload")
             _emit_job_failure(

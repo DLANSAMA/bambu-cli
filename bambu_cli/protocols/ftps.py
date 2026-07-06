@@ -198,22 +198,10 @@ class ConnectionManager:
         self._lock = threading.Lock()
         self._ftp_usage_lock = threading.Lock()
 
-    def get_mqtt(self, client_id=""):
-        from bambu_cli import bambu
-        with self._lock:
-            if self._mqtt_client is not None:
-                try:
-                    if self._mqtt_client.is_connected():
-                        return self._mqtt_client
-                except Exception:
-                    pass
-            client = bambu.create_mqtt_client(client_id)
-            bambu._mqtt_connect(client)
-            self._mqtt_client = client
-            return client
-
-    def get_ftp(self, timeout=60):
-        from bambu_cli import bambu
+    def get_ftp(self, printer=None, timeout=60):
+        if printer is None:
+            from bambu_cli.printer import get_printer
+            printer = get_printer()
         with self._lock:
             client = self._ftp_client
         if client is not None:
@@ -230,7 +218,7 @@ class ConnectionManager:
                             pass
                         self._ftp_client = None
 
-        ftp = _create_raw_ftp(timeout)
+        ftp = _create_raw_ftp(printer, timeout=timeout)
         with self._lock:
             self._ftp_client = ftp
             return PooledFTPWrapper(ftp, self)
@@ -278,5 +266,5 @@ def _create_raw_ftp(printer, timeout=60):
 
 
 @mockable
-def get_ftp(timeout=60):
-    return connection_manager.get_ftp(timeout)
+def get_ftp(printer=None, timeout=60):
+    return connection_manager.get_ftp(printer, timeout=timeout)

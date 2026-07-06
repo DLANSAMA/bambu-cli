@@ -542,29 +542,120 @@ def cmd_slice(args):
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,
+                text=False,
             )
             stdout_lines = []
+            stderr_lines = []
+
+            progress = None
+            task_id = None
             try:
-                stdout_data, stderr_content = process.communicate(timeout=slicer_timeout)
-                if stdout_data:
-                    for line in stdout_data.splitlines(True):
-                        stdout_lines.append(line)
-                        line_str = line.strip()
-                        if any(pat in line_str.lower() for pat in ("progress", "%", "slicing", "exporting")):
-                            logger.info(f"   [OrcaSlicer] {line_str}")
-                        elif line_str:
-                            logger.debug(f"   [OrcaSlicer] {line_str}")
+                if not getattr(args, "json", False):
+                    from rich.progress import Progress, TextColumn, BarColumn, TimeElapsedColumn
+                    progress = Progress(
+                        TextColumn("[bold blue]{task.description}", justify="right"),
+                        BarColumn(bar_width=None),
+                        "[progress.percentage]{task.percentage:>3.1f}%",
+                        "•",
+                        TimeElapsedColumn(),
+                        transient=True
+                    )
+                    progress.start()
+                    task_id = progress.add_task(f"Slicing {os.path.basename(filepath)}", total=100)
+            except ImportError:
+                pass
+
+            import queue
+            import re
+            import threading
+            import time
+
+            chunk_queue = queue.Queue()
+
+            def _pump(stream, name):
+                while True:
+                    chunk = stream.read1(4096)
+                    if not chunk:
+                        break
+                    chunk_queue.put((name, chunk.decode("utf-8", errors="replace")))
+
+            readers = [
+                threading.Thread(target=_pump, args=(process.stdout, "stdout"), daemon=True),
+                threading.Thread(target=_pump, args=(process.stderr, "stderr"), daemon=True),
+            ]
+            for t in readers:
+                t.start()
+
+            def _handle_stdout_line(line_str):
+                pct_match = re.search(r'(\d+)%', line_str)
+                if progress and task_id is not None and pct_match:
+                    progress.update(task_id, completed=int(pct_match.group(1)))
+                if any(pat in line_str.lower() for pat in ("progress", "%", "slicing", "exporting")):
+                    logger.info(f"   [OrcaSlicer] {line_str}")
+                elif line_str:
+                    logger.debug(f"   [OrcaSlicer] {line_str}")
+
+            stdout_carry = ""
+
+            def _consume(name, text):
+                nonlocal stdout_carry
+                if name == "stderr":
+                    stderr_lines.append(text)
+                    return
+                stdout_lines.append(text)
+                # OrcaSlicer emits progress lines terminated by \r as well as \n
+                parts = re.split(r'[\r\n]', stdout_carry + text)
+                stdout_carry = parts.pop()
+                for part in parts:
+                    line_str = part.strip()
+                    if line_str:
+                        _handle_stdout_line(line_str)
+
+            try:
+                start_time = time.monotonic()
+                while True:
+                    try:
+                        name, text = chunk_queue.get(timeout=0.5)
+                        _consume(name, text)
+                    except queue.Empty:
+                        pass
+                    if time.monotonic() - start_time > slicer_timeout:
+                        raise subprocess.TimeoutExpired(cmd, slicer_timeout)
+                    if process.poll() is not None:
+                        alive = False
+                        for t in readers:
+                            t.join(timeout=2)
+                            alive = alive or t.is_alive()
+                        if not alive:
+                            break
+                # Final drain after both readers exit
+                while True:
+                    try:
+                        name, text = chunk_queue.get_nowait()
+                    except queue.Empty:
+                        break
+                    _consume(name, text)
+                if stdout_carry.strip():
+                    _handle_stdout_line(stdout_carry.strip())
             except subprocess.TimeoutExpired:
                 process.kill()
+                process.wait()
                 raise
+            finally:
+                if progress:
+                    progress.stop()
+                for stream in (process.stdout, process.stderr):
+                    try:
+                        stream.close()
+                    except Exception:
+                        pass
+
             process.wait()
             result = subprocess.CompletedProcess(
                 cmd,
                 returncode=process.returncode,
                 stdout="".join(stdout_lines),
-                stderr=stderr_content,
+                stderr="".join(stderr_lines),
             )
         except subprocess.TimeoutExpired:
             message = f"Slicing timed out after {slicer_timeout} seconds"

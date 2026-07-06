@@ -57,14 +57,24 @@ def _slice_args(tmpdir, infile):
 
 
 def _fake_popen_factory(returncode, stdout="", stderr=""):
-    """Return a class that stands in for subprocess.Popen and yields the given result."""
+    """Return a class that stands in for subprocess.Popen and yields the given result.
+
+    cmd_slice now reads stdout/stderr via reader threads calling read1() on the
+    raw byte pipes, so expose them as io.BytesIO streams plus poll()/wait()/kill().
+    """
+    import io
 
     class _FakePopen:
         def __init__(self, *a, **k):
             self.returncode = returncode
+            self.stdout = io.BytesIO(stdout.encode("utf-8"))
+            self.stderr = io.BytesIO(stderr.encode("utf-8"))
 
         def communicate(self, timeout=None):
             return stdout, stderr
+
+        def poll(self):
+            return self.returncode
 
         def wait(self):
             return self.returncode

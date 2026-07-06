@@ -70,7 +70,7 @@ Runs a network and connectivity health check, discovers printer capabilities, an
   "ok": true,
   "output": "/tmp/printer_capabilities.json",
   "printer_ip": "<redacted>",
-  "certificate_fingerprint": "74694354162edf89...",
+  "certificate_fingerprint": "0123456789abcdef...",
   "capabilities": {
     "model": "P1P",
     "firmware": "01.00.00.00",

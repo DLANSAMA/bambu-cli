@@ -17,10 +17,7 @@ def mockable(func):
         bambu = sys.modules.get('bambu_cli.bambu')
         if bambu:
             bambu_func = getattr(bambu, func.__name__, None)
-            print(f"[mockable] func={func.__name__} bambu_func={bambu_func} wrapper={wrapper}", file=sys.stderr)
             if bambu_func and bambu_func is not wrapper and bambu_func is not func:
-                res = bambu_func(*args, **kwargs)
-                print(f"[mockable] delegated call returned: {res}", file=sys.stderr)
-                return res
+                return bambu_func(*args, **kwargs)
         return func(*args, **kwargs)
     return wrapper

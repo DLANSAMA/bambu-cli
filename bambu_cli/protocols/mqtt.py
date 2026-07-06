@@ -109,7 +109,6 @@ def probe_cert_fingerprint(host, port=990, timeout=5):
 
 
 def create_mqtt_client(printer, client_id=""):
-    from bambu_cli import bambu
     global _TRUSTED_CERT_FILE
     if printer.simulation_mode:
         return _SimMqttClient()
@@ -133,13 +132,33 @@ def create_mqtt_client(printer, client_id=""):
         orig_wrap = ctx.wrap_socket
         def wrap_socket_with_pinning(*args, **kwargs):
             tls_sock = orig_wrap(*args, **kwargs)
-            der = tls_sock.getpeercert(binary_form=True)
             from bambu_cli.config import fingerprint_sha256
-            actual = fingerprint_sha256(der).lower()
-            if actual != expected_fp:
-                raise ssl.SSLError(f"Certificate fingerprint mismatch: expected {expected_fp}, got {actual}")
+
+            def _verify_pin():
+                der = tls_sock.getpeercert(binary_form=True)
+                if der is None:
+                    raise ssl.SSLError("No peer certificate to verify fingerprint against")
+                actual = fingerprint_sha256(der).lower()
+                if actual != expected_fp:
+                    raise ssl.SSLError(f"Certificate fingerprint mismatch: expected {expected_fp}, got {actual}")
+
+            # paho wraps with do_handshake_on_connect=False, so the peer cert
+            # is not available yet; defer verification to handshake completion.
+            try:
+                tls_sock.getpeercert(binary_form=True)
+                handshake_done = True
+            except ValueError:
+                handshake_done = False
+            if handshake_done:
+                _verify_pin()
+            else:
+                orig_handshake = tls_sock.do_handshake
+                def do_handshake_with_pinning(*hs_args, **hs_kwargs):
+                    orig_handshake(*hs_args, **hs_kwargs)
+                    _verify_pin()
+                tls_sock.do_handshake = do_handshake_with_pinning
             return tls_sock
-            
+
         ctx.wrap_socket = wrap_socket_with_pinning
         client.tls_set_context(ctx)
         client.tls_insecure_set(True)
@@ -148,7 +167,6 @@ def create_mqtt_client(printer, client_id=""):
     return client
 
 def _mqtt_connect(printer, client):
-    from bambu_cli import bambu
     resolved_ip = _resolve_ip(printer.ip)
     old_timeout = socket.getdefaulttimeout()
     try:
@@ -160,7 +178,6 @@ def _mqtt_connect(printer, client):
 @mockable
 def send_command(printer, payload, timeout=None, retries=2):
     """Send a command to the printer with retries."""
-    from bambu_cli import bambu
     if timeout is None:
         timeout = printer.mqtt_timeout
 
@@ -220,7 +237,6 @@ def send_command(printer, payload, timeout=None, retries=2):
 @mockable
 def get_status(printer, timeout=None, retries=2):
     """Get printer status via MQTT with retries."""
-    from bambu_cli import bambu
     if timeout is None:
         timeout = printer.mqtt_timeout
 
@@ -293,7 +309,6 @@ def get_status(printer, timeout=None, retries=2):
 @mockable
 def get_version(printer, timeout=5, retries=1):
     """Fetch printer module versions via the MQTT get_version command."""
-    from bambu_cli import bambu
     if printer.simulation_mode:
         return [{"name": "ota", "sw_ver": "01.00.00.00", "hw_ver": "P1P-SIM"}]
 
@@ -352,11 +367,12 @@ def get_version(printer, timeout=5, retries=1):
 @mockable
 def monitor_status(args):
     """Subscribe to the printer's report topic and log updates until a terminal state is reached."""
-    from bambu_cli import bambu
     from bambu_cli.cli import _namespace_get
     from bambu_cli.utils import emit_json
+    from bambu_cli.printer import get_printer
+    printer = get_printer()
     logger.info("📡 Starting status monitor loop. Press Ctrl+C to stop.")
-    if bambu.SIMULATION_MODE:
+    if printer.simulation_mode:
         logger.info("🤖 [SIM] Simulated status: State=PREPARE, Progress=0%")
         time.sleep(0.5)
         logger.info("🤖 [SIM] Simulated status: State=RUNNING, Progress=50%")
@@ -376,14 +392,17 @@ def monitor_status(args):
 
     terminal_states = {"FINISH", "FAILED", "STOP", "IDLE"}
     received_terminal = threading.Event()
-    client = bambu.create_mqtt_client()
-    client.user_data_set({})
-    
+    json_mode = bool(_namespace_get(args, "json", False))
+    show_progress_bar = not json_mode and sys.stdout.isatty()
+    client = create_mqtt_client(printer)
+    userdata = {}
+    client.user_data_set(userdata)
+
     def on_connect(client, userdata, flags, rc, properties=None):
         if rc == 0:
-            client.subscribe(f"device/{bambu.SERIAL}/report")
+            client.subscribe(f"device/{printer.serial}/report")
             push = json.dumps({"pushing": {"sequence_id": get_sequence_id(), "command": "pushall"}})
-            client.publish(f"device/{bambu.SERIAL}/request", push)
+            client.publish(f"device/{printer.serial}/request", push)
         else:
             logger.error(f"Connection failed: rc={rc}")
             received_terminal.set()
@@ -400,6 +419,8 @@ def monitor_status(args):
                 pct = p.get("mc_percent", 0)
                 
                 if state != last_state[0] or pct != last_pct[0]:
+                    if 'progress' not in userdata and not show_progress_bar:
+                        userdata['progress'] = None
                     if 'progress' not in userdata:
                         try:
                             from rich.progress import Progress, BarColumn, TextColumn, TimeElapsedColumn
@@ -445,13 +466,18 @@ def monitor_status(args):
     client.on_message = on_message
 
     try:
-        bambu._mqtt_connect(client)
+        _mqtt_connect(printer, client)
         client.loop_start()
         while not received_terminal.is_set():
             received_terminal.wait(1.0)
     except KeyboardInterrupt:
         logger.info("\n🛑 Monitor loop stopped by user.")
     finally:
+        if userdata.get('progress'):
+            try:
+                userdata['progress'].stop()
+            except Exception:
+                pass
         try:
             client.loop_stop()
             client.disconnect()
@@ -462,16 +488,6 @@ import tempfile
 import base64
 
 _TRUSTED_CERT_FILE = None
-
-def probe_cert_fingerprint(host, port=990, timeout=5):
-    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    with socket.create_connection((host, port), timeout) as raw:
-        with ctx.wrap_socket(raw, server_hostname=host) as tls:
-            der = tls.getpeercert(binary_form=True)
-            from bambu_cli.config import fingerprint_sha256
-            return fingerprint_sha256(der)
 
 def _get_and_verify_cert_pem(host, port, expected_fingerprint, timeout=5):
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -495,17 +511,16 @@ def _get_and_verify_cert_pem(host, port, expected_fingerprint, timeout=5):
 
 
 @mockable
-def execute_print_command(payload, basename, dry_run=False):
+def execute_print_command(printer, payload, basename, dry_run=False):
     """Send the print payload via MQTT and monitor for errors."""
     from bambu_cli import bambu
     from bambu_cli.utils import record_error_detail
     from bambu_cli.cli import EXIT_FILE_ERROR, EXIT_NETWORK_ERROR, EXIT_TIMEOUT, EXIT_PRINTER_ERROR
-    get_ftp = getattr(bambu, "get_ftp")
     
     if dry_run:
         logger.info(f"🔍 Dry Run: Checking if {basename} exists on printer...")
         try:
-            with get_ftp(timeout=5) as ftp:
+            with printer.get_ftp_client(timeout=5) as ftp:
                 files = ftp.nlst('/model/')
                 if basename in files or f"/model/{basename}" in files:
                     logger.info(f"   ✅ File {basename} found on printer.")
@@ -515,7 +530,7 @@ def execute_print_command(payload, basename, dry_run=False):
                     record_error_detail("print", EXIT_FILE_ERROR, message, failed_step="dry_run", file=basename, printed=False)
                     sys.exit(EXIT_FILE_ERROR)
             logger.info("   ✅ Printer reachable via MQTT (status check)...")
-            if bambu.get_status(timeout=5):
+            if printer.status(timeout=5):
                 logger.info("   ✅ MQTT connection verified.")
             else:
                 message = "MQTT connection failed."
@@ -529,7 +544,7 @@ def execute_print_command(payload, basename, dry_run=False):
             record_error_detail("print", EXIT_NETWORK_ERROR, message, failed_step="dry_run", file=basename, printed=False)
             sys.exit(EXIT_NETWORK_ERROR)
 
-    if bambu.SIMULATION_MODE:
+    if printer.simulation_mode:
         from bambu_cli.protocols.ftps import _SIM_FTP_FILES
         if basename not in _SIM_FTP_FILES:
             message = f"File {basename} not found on simulated printer. Upload it first."
@@ -539,15 +554,15 @@ def execute_print_command(payload, basename, dry_run=False):
         logger.info(f"🤖 [SIM] Print started: {basename}")
         return
 
-    client = bambu.create_mqtt_client("bambu_print")
+    client = create_mqtt_client(printer, "bambu_print")
 
     print_error = [None]
     command_accepted = threading.Event()
 
     def on_connect(client, userdata, flags, rc, properties=None):
         if rc == 0:
-            client.subscribe(f"device/{bambu.SERIAL}/report")
-            client.publish(f"device/{bambu.SERIAL}/request", payload)
+            client.subscribe(f"device/{printer.serial}/report")
+            client.publish(f"device/{printer.serial}/request", payload)
         else:
             logger.error(f"Connection failed: rc={rc}")
             command_accepted.set()
@@ -576,7 +591,7 @@ def execute_print_command(payload, basename, dry_run=False):
     print_ack_timeout = bambu.get_command_timeout() + 5  # default historical: 10
 
     try:
-        bambu._mqtt_connect(client)
+        _mqtt_connect(printer, client)
         client.loop_start()
         try:
             accepted = command_accepted.wait(print_ack_timeout)
