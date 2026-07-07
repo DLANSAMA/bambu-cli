@@ -172,11 +172,13 @@ def _process_profile_compatible(path, compatible_printer):
         return False
     return compatible_printer in compatible
 
-def _discover_process_profile(quality_arg, quality_map, model_code="P1P", compatible_printer=None):
+def _discover_process_profile(quality_arg, quality_map, model_code="P1P", compatible_printer=None, profiles_dir=None):
     """Discover a matching process profile."""
-    from bambu_cli import bambu
+    if profiles_dir is None:
+        from bambu_cli.context import Settings
+        profiles_dir = Settings.from_globals().profiles_dir
     layer_height = quality_arg if quality_arg.startswith("0.") else quality_map.get(quality_arg, f"0.20mm Standard @BBL {model_code}").split(" ")[0]
-    proc_dir = os.path.join(bambu.PROFILES_DIR, "process")
+    proc_dir = os.path.join(profiles_dir, "process")
     if os.path.isdir(proc_dir):
         files = os.listdir(proc_dir)
         process_file = next((f for f in files if f.startswith(layer_height) and model_code in f and "nozzle" not in f), None)
@@ -318,9 +320,11 @@ def cmd_slice(args):
     """Slice an STL/STEP file into a printable .3mf using OrcaSlicer."""
     from bambu_cli import bambu
     from bambu_cli.cli import _namespace_get, _exit_code_from_system_exit
+    from bambu_cli.context import Settings
     from bambu_cli.utils import emit_json, emit_json_error
     from bambu_cli.constants import EXIT_FILE_ERROR, EXIT_COMMAND_ERROR, EXIT_CONFIG_ERROR, EXIT_TIMEOUT
 
+    settings = Settings.from_globals()
     filepath = bambu._expand_path(args.file)
     source_filepath = filepath
     if filepath.startswith('-'):
@@ -362,7 +366,7 @@ def cmd_slice(args):
             filepath = new_filepath
             step_converted = True
 
-        model_info = bambu.MODEL_MAPPING.get(bambu.PRINTER_MODEL, bambu.MODEL_MAPPING["P1P"])
+        model_info = bambu.MODEL_MAPPING.get(settings.printer_model, bambu.MODEL_MAPPING["P1P"])
         model_code = model_info["token"]
         full_model_name = model_info["full_name"]
 
@@ -401,21 +405,21 @@ def cmd_slice(args):
         outpath = _sliced_output_path(source_filepath, outdir, copies)
         outfile = os.path.basename(outpath)
 
-        machine_file = f"{full_model_name} {bambu.NOZZLE_SIZE} nozzle.json"
-        machine = os.path.join(bambu.PROFILES_DIR, "machine", machine_file)
+        machine_file = f"{full_model_name} {settings.nozzle_size} nozzle.json"
+        machine = os.path.join(settings.profiles_dir, "machine", machine_file)
         if not os.path.exists(machine):
-            logger.warning(f"⚠️  Machine profile '{machine_file}' not found. Trying standard P1P with {bambu.NOZZLE_SIZE} nozzle...")
-            machine_file_fallback = f"Bambu Lab P1P {bambu.NOZZLE_SIZE} nozzle.json"
-            machine_fallback = os.path.join(bambu.PROFILES_DIR, "machine", machine_file_fallback)
+            logger.warning(f"⚠️  Machine profile '{machine_file}' not found. Trying standard P1P with {settings.nozzle_size} nozzle...")
+            machine_file_fallback = f"Bambu Lab P1P {settings.nozzle_size} nozzle.json"
+            machine_fallback = os.path.join(settings.profiles_dir, "machine", machine_file_fallback)
             if os.path.exists(machine_fallback):
                 machine = machine_fallback
             else:
                 logger.warning(f"⚠️  Fallback machine profile '{machine_file_fallback}' not found. Using standard P1P 0.4 nozzle.")
-                machine = os.path.join(bambu.PROFILES_DIR, "machine", "Bambu Lab P1P 0.4 nozzle.json")
+                machine = os.path.join(settings.profiles_dir, "machine", "Bambu Lab P1P 0.4 nozzle.json")
 
-        process = os.path.join(bambu.PROFILES_DIR, "process", process_file)
+        process = os.path.join(settings.profiles_dir, "process", process_file)
 
-        filament_dir = os.path.join(bambu.PROFILES_DIR, "filament")
+        filament_dir = os.path.join(settings.profiles_dir, "filament")
         filament = None
         requested_filament_name = _namespace_get(args, 'filament', 'PLA Basic') or 'PLA Basic'
         requested_filament = str(requested_filament_name).lower()
@@ -436,21 +440,22 @@ def cmd_slice(args):
             logger.warning(f"⚠️  Filament matching '{requested_filament_name}' not found. Falling back to Bambu PLA Basic.")
             filament = os.path.join(filament_dir, "Bambu PLA Basic @base.json")
 
-        slicer_problem = _slicer_executable_problem(bambu.ORCA_SLICER)
+        slicer_problem = _slicer_executable_problem(settings.orca_slicer)
         if slicer_problem:
             message = slicer_problem
             logger.error(message)
             logger.info("Please update 'orca_slicer' in your config.json or place it in the tools/ directory.")
-            emit_json_error(args, "slice", EXIT_CONFIG_ERROR, message, failed_step="slicer", file=filepath, orca_slicer=bambu.ORCA_SLICER)
+            emit_json_error(args, "slice", EXIT_CONFIG_ERROR, message, failed_step="slicer", file=filepath, orca_slicer=settings.orca_slicer)
             sys.exit(EXIT_CONFIG_ERROR)
 
         if not os.path.exists(process):
-            compatible_printer = f"{full_model_name} {bambu.NOZZLE_SIZE} nozzle"
+            compatible_printer = f"{full_model_name} {settings.nozzle_size} nozzle"
             process = _discover_process_profile(
                 args.quality,
                 quality_map,
                 model_code=model_code,
                 compatible_printer=compatible_printer,
+                profiles_dir=settings.profiles_dir,
             )
             if not process:
                 emit_json_error(args, "slice", EXIT_CONFIG_ERROR, "No slicer process profile found.", failed_step="profiles", file=filepath)
@@ -491,7 +496,7 @@ def cmd_slice(args):
                                    "Install it: `sudo pacman -S xorg-server-xvfb` (Arch/CachyOS) or `sudo apt install xvfb` (Debian/Ubuntu).")
 
         cmd.extend([
-            bambu.ORCA_SLICER,
+            settings.orca_slicer,
             "--load-settings", f"{machine};{tmp_process.name}",
             "--load-filaments", tmp_filament.name,
             "--slice", "0",
@@ -674,7 +679,7 @@ def cmd_slice(args):
                 message,
                 failed_step="slicer",
                 file=filepath,
-                orca_slicer=bambu.ORCA_SLICER,
+                orca_slicer=settings.orca_slicer,
                 output=outpath,
             )
             sys.exit(EXIT_CONFIG_ERROR)

@@ -154,28 +154,32 @@ MODEL_MAPPING = {
 }
 
 def apply_config(cfg):
-    """Dynamically apply a configuration dictionary to the global state."""
+    """Apply a configuration dictionary to the runtime state.
+
+    The dict is parsed once into a typed :class:`bambu_cli.context.Settings`
+    (the canonical parse), which is then mirrored onto the ``bambu.<NAME>``
+    module globals so legacy readers and test patches keep working.
+    """
     from bambu_cli import bambu
-    from bambu_cli.cli import _expand_path
+    from bambu_cli.context import Settings
     if not cfg:
         return
+    settings = Settings.from_config(cfg)
     bambu._cfg = cfg
-    bambu.PRINTER_IP = cfg.get("printer_ip", DEFAULT_PRINTER_IP)
-    bambu.SERIAL = cfg.get("serial", DEFAULT_SERIAL)
-    bambu.MQTT_PORT = cfg.get("mqtt_port", DEFAULT_MQTT_PORT)
-    bambu.INSECURE_TLS = cfg.get("insecure_tls", False)
-    if bambu.INSECURE_TLS:
+    bambu.PRINTER_IP = settings.printer_ip
+    bambu.SERIAL = settings.serial
+    bambu.MQTT_PORT = settings.mqtt_port
+    bambu.INSECURE_TLS = settings.insecure_tls
+    if settings.insecure_tls:
         logger.warning("🚨 SECURITY WARNING: 'insecure_tls' is enabled! TLS certificate validation is DISABLED for all connections. Your network traffic is vulnerable to MITM attacks.")
-    bambu.ORCA_SLICER = _expand_path(cfg.get("orca_slicer", _DEFAULT_ORCA or ""))
-    bambu.PROFILES_DIR = _expand_path(cfg.get("profiles_dir", _DEFAULT_PROFILES or ""))
-    bambu.PRINTER_MODEL = cfg.get("model", cfg.get("printer_model", DEFAULT_PRINTER_MODEL)).upper()
-    bambu.NOZZLE_SIZE = str(cfg.get("nozzle", cfg.get("nozzle_size", DEFAULT_NOZZLE_SIZE)))
-    bambu.CAMERA_IMAGE = cfg.get("camera_image", DEFAULT_CAMERA_IMAGE)
-    bambu.CAMERA_CONTAINER_NAME = cfg.get("camera_container_name", DEFAULT_CAMERA_CONTAINER_NAME)
-    bambu.CAMERA_PORT = cfg.get("camera_port", DEFAULT_CAMERA_PORT)
-    
-    host_port = bambu.CAMERA_PORT.split(":")[0]
-    bambu.CAMERA_STREAM_URL = cfg.get("camera_stream_url", f"http://localhost:{host_port}/api/frame.jpeg?src=p1s")
+    bambu.ORCA_SLICER = settings.orca_slicer
+    bambu.PROFILES_DIR = settings.profiles_dir
+    bambu.PRINTER_MODEL = settings.printer_model
+    bambu.NOZZLE_SIZE = settings.nozzle_size
+    bambu.CAMERA_IMAGE = settings.camera_image
+    bambu.CAMERA_CONTAINER_NAME = settings.camera_container_name
+    bambu.CAMERA_PORT = settings.camera_port
+    bambu.CAMERA_STREAM_URL = settings.camera_stream_url
 
 
 _INLINE_ACCESS_CODE_WARNED = False

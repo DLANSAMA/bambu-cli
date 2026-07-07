@@ -1,10 +1,12 @@
-"""Typed runtime context, introduced alongside (not instead of) the module
-globals on :mod:`bambu_cli.bambu`.
+"""Typed runtime context for command handlers.
 
-This is phase 1 of a gradual de-globalization: ``Settings``/``RuntimeContext``
-snapshot the same state that lives on ``bambu.<NAME>`` and ``apply_config``
-populates. The globals remain the source of truth for now; nothing here
-changes existing behavior. Command handlers are not migrated yet.
+``Settings.from_config`` is the canonical config parse: ``apply_config``
+builds a Settings and mirrors it onto the ``bambu.<NAME>`` module globals,
+which remain only as a write-through compatibility layer for tests and
+legacy callers. Handlers take per-call snapshots via
+``RuntimeContext.from_globals(args)`` / ``Settings.from_globals()`` so test
+patches on the globals are still honored. Do not add new module globals;
+add fields here instead.
 """
 
 from __future__ import annotations
