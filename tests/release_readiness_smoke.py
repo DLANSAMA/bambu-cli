@@ -53,6 +53,7 @@ FORBIDDEN_GENERATED_PATHS = {
     "dist",
     "wheelhouse",
     "bambu_cli.egg-info",
+    "bambu_local_cli.egg-info",
 }
 
 FORBIDDEN_GENERATED_NAMES = {
