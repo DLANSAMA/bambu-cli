@@ -127,8 +127,9 @@ class TestMigrateAccessCode(unittest.TestCase):
         with open(self.access_code_file, encoding="utf-8") as f:
             self.assertEqual(f.read().strip(), "SECRET123")
 
-        mode = stat.S_IMODE(os.stat(self.access_code_file).st_mode)
-        self.assertEqual(mode, 0o600)
+        if os.name != "nt":  # chmod(0o600) can't restrict group/other bits on Windows
+            mode = stat.S_IMODE(os.stat(self.access_code_file).st_mode)
+            self.assertEqual(mode, 0o600)
 
     def test_noop_when_no_inline_code_present(self):
         self._write_config({

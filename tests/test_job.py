@@ -22,7 +22,7 @@ sys.modules.setdefault("paho.mqtt.client", _mock_mqtt)
 from bambu_cli import bambu  # noqa: E402
 from bambu_cli import job  # noqa: E402
 from bambu_cli import utils  # noqa: E402
-from bambu_cli.cli import build_parser  # noqa: E402
+from bambu_cli.cli import _display_path, build_parser  # noqa: E402
 from bambu_cli.constants import EXIT_COMMAND_ERROR, EXIT_FILE_ERROR  # noqa: E402
 from bambu_cli.context import RuntimeContext  # noqa: E402
 from bambu_cli.job import JobSteps, _run_job  # noqa: E402
@@ -292,7 +292,7 @@ def test_dry_run_local_printer_ready_file(tmp_path, capsys):
     assert payload["status"] == "dry_run_local_skipped"
     assert payload["would_upload"] is True
     assert payload["would_slice"] is False
-    assert payload["printable_path"] == str(ready)
+    assert payload["printable_path"] == _display_path(str(ready))
 
 
 def test_dry_run_local_printer_ready_empty_file_fails(tmp_path):
@@ -400,7 +400,7 @@ def test_output_created_when_needed(tmp_path, capsys):
     _run_job(_ctx(), args, steps)
     assert out_dir.is_dir()
     payload = _read_json(capsys)
-    assert payload["workdir"] == str(out_dir)
+    assert payload["workdir"] == _display_path(str(out_dir))
     assert payload["uploaded"] is True
 
 
