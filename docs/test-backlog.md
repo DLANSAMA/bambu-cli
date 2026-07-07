@@ -7,7 +7,7 @@ All 288 existing tests pass; coverage below is from `pytest --cov=bambu_cli`.
 ## Ground rules for new tests
 
 - Run everything with `uv run --extra test python -m pytest` plus
-  `python3 -W error::ResourceWarning -m unittest tests.test_bambu`.
+  `python3 -W error::ResourceWarning -m unittest tests.test_config_and_logging tests.test_protocol_clients tests.test_cli_entry tests.test_printer_commands tests.test_slice_cmd tests.test_download_cmd tests.test_camera_cmd tests.test_doctor_and_safety`.
 - Never touch a real printer or the network. Use `--sim` for CLI-level tests
   (see `tests/agent_cli_smoke.py`) or mock at module seams.
 - Patch targets: patch functions **in the module that calls them**, e.g.

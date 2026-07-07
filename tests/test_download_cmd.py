@@ -1,0 +1,716 @@
+from tests.bambu_test_base import *  # noqa: F401,F403
+
+
+class TestResolvePrintablesUrl(unittest.TestCase):
+
+
+
+
+
+    @patch("bambu_cli.bambu.logger")
+    def test_get_printables_model_not_found(self, mock_logger):
+        from bambu_cli.bambu import _get_printables_file_info
+        import json
+        mock_opener = MagicMock()
+
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps({"data": {"print": None}}).encode()
+        mock_opener.open.return_value.__enter__.return_value = mock_resp
+
+        fid, ftype, fname = _get_printables_file_info("123", {}, mock_opener)
+        self.assertIsNone(fid)
+        self.assertIsNone(ftype)
+        self.assertIsNone(fname)
+        mock_logger.error.assert_called_with("Model #123 not found on Printables")
+
+    @patch("bambu_cli.bambu.logger")
+    def test_get_printables_no_valid_files(self, mock_logger):
+        from bambu_cli.bambu import _get_printables_file_info
+        import json
+        mock_opener = MagicMock()
+
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps({"data": {"print": {"name": "Test", "stls": [{"id": "1", "name": "part1.txt", "fileSize": 1024}], "gcodes": []}}}).encode()
+        mock_opener.open.return_value.__enter__.return_value = mock_resp
+
+        fid, ftype, fname = _get_printables_file_info("123", {}, mock_opener)
+        self.assertIsNone(fid)
+        self.assertIsNone(ftype)
+        self.assertIsNone(fname)
+        mock_logger.error.assert_called_with("No STL, STEP, or 3MF files found for this model")
+
+    @patch("bambu_cli.bambu.logger")
+    def test_get_printables_url_error(self, mock_logger):
+        from bambu_cli.bambu import _get_printables_file_info
+        import urllib.error
+        mock_opener = MagicMock()
+        mock_opener.open.side_effect = urllib.error.URLError("Network unreachable")
+
+        fid, ftype, fname = _get_printables_file_info("123", {}, mock_opener)
+        self.assertIsNone(fid)
+        self.assertIsNone(ftype)
+        self.assertIsNone(fname)
+        mock_logger.error.assert_called_with("Network error querying Printables API: <urlopen error Network unreachable>")
+
+
+    @patch('bambu_cli.bambu.logger')
+    def test_get_printables_multiple_stls(self, mock_logger):
+        from bambu_cli.bambu import _get_printables_file_info
+        import json
+        mock_opener = MagicMock()
+
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps({
+            "data": {
+                "print": {
+                    "name": "Test",
+                    "stls": [
+                        {"id": "1", "name": "part1.stl", "fileSize": 1024},
+                        {"id": "2", "name": "part2.stl", "fileSize": 2048}
+                    ]
+                }
+            }
+        }).encode()
+        mock_opener.open.return_value.__enter__.return_value = mock_resp
+
+        fid, ftype, fname = _get_printables_file_info("123", {}, mock_opener)
+        self.assertEqual(fid, "2")
+        self.assertEqual(ftype, "stl")
+        mock_logger.info.assert_any_call("   Found 2 STL files:")
+
+    @patch('bambu_cli.bambu.logger')
+    def test_get_printables_multiple_steps(self, mock_logger):
+        from bambu_cli.bambu import _get_printables_file_info
+        import json
+        mock_opener = MagicMock()
+
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps({
+            "data": {
+                "print": {
+                    "name": "Test",
+                    "stls": [
+                        {"id": "1", "name": "part1.step", "fileSize": 1024},
+                        {"id": "2", "name": "part2.step", "fileSize": 2048}
+                    ]
+                }
+            }
+        }).encode()
+        mock_opener.open.return_value.__enter__.return_value = mock_resp
+
+        fid, ftype, fname = _get_printables_file_info("123", {}, mock_opener)
+        self.assertEqual(fid, "2")
+        self.assertEqual(ftype, "stl")
+        mock_logger.info.assert_any_call("   Found 2 STEP files:")
+
+    @patch('bambu_cli.bambu.logger')
+    def test_get_printables_3mf_fallback(self, mock_logger):
+        from bambu_cli.bambu import _get_printables_file_info
+        import json
+        mock_opener = MagicMock()
+
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps({
+            "data": {
+                "print": {
+                    "name": "Test",
+                    "stls": [
+                        {"id": "1", "name": "part1.3mf", "fileSize": 1024}
+                    ],
+                    "gcodes": [
+                        {"id": "2", "name": "part2.3mf", "fileSize": 2048}
+                    ]
+                }
+            }
+        }).encode()
+        mock_opener.open.return_value.__enter__.return_value = mock_resp
+
+        fid, ftype, fname = _get_printables_file_info("123", {}, mock_opener)
+        self.assertEqual(fid, "2")
+        # 3MF from gcodes sets type="gcode"
+        self.assertEqual(ftype, "gcode")
+
+    @patch('bambu_cli.bambu.logger')
+    def test_get_printables_generic_exception(self, mock_logger):
+        from bambu_cli.bambu import _get_printables_file_info
+        mock_opener = MagicMock()
+        mock_opener.open.side_effect = Exception("Generic Fetch Error")
+
+        fid, ftype, fname = _get_printables_file_info("123", {}, mock_opener)
+        self.assertIsNone(fid)
+        mock_logger.error.assert_called_with("Failed to query Printables API: Generic Fetch Error")
+
+    @patch('bambu_cli.bambu.logger')
+    def test_get_printables_download_link_error(self, mock_logger):
+        from bambu_cli.bambu import _get_printables_download_link
+        import json
+        mock_opener = MagicMock()
+
+        mock_resp = MagicMock()
+        # Mock API returning None link
+        mock_resp.read.return_value = json.dumps({
+            "data": {
+                "fileDownloadLink": None
+            }
+        }).encode()
+        mock_opener.open.return_value.__enter__.return_value = mock_resp
+
+        result = _get_printables_download_link("1", "1", "stl", "name.stl", {}, mock_opener)
+        self.assertEqual(result, (None, None))
+        mock_logger.error.assert_called_with("Failed to get download link: unknown error")
+
+        # Test exception path
+        mock_opener.open.side_effect = Exception("Link Fetch Error")
+        result = _get_printables_download_link("1", "1", "stl", "name.stl", {}, mock_opener)
+        self.assertEqual(result, (None, None))
+        mock_logger.error.assert_called_with("Failed to get download link: Link Fetch Error")
+
+    @patch('bambu_cli.printables.build_safe_opener')
+    @patch('bambu_cli.bambu.logger')
+    def test_resolve_printables_url_success(self, mock_logger, mock_safe_opener):
+        mock_urlopen = mock_safe_opener.return_value.open
+        from bambu_cli.bambu import resolve_printables_url
+        import json
+
+        # First call: GraphQL query for model details
+        mock_response_1 = MagicMock()
+        mock_response_1.read.return_value = json.dumps({
+            "data": {
+                "print": {
+                    "name": "Test Model",
+                    "stls": [{"name": "part1.stl", "fileSize": 1024, "id": "file_123"}],
+                    "gcodes": []
+                }
+            }
+        }).encode()
+
+        # Second call: GraphQL mutation for download link
+        mock_response_2 = MagicMock()
+        mock_response_2.read.return_value = json.dumps({
+            "data": {
+                "getDownloadLink": {
+                    "ok": True,
+                    "output": {"link": "https://download.example.com/part1.stl"}
+                }
+            }
+        }).encode()
+
+        # Set side effect for urlopen context manager
+        mock_urlopen.return_value.__enter__.side_effect = [mock_response_1, mock_response_2]
+
+        url = "https://www.printables.com/model/12345-test-model"
+        download_url, filename = resolve_printables_url(url)
+
+        self.assertEqual(download_url, "https://download.example.com/part1.stl")
+        self.assertEqual(filename, "part1.stl")
+
+    @patch('bambu_cli.bambu.logger')
+    def test_resolve_printables_url_not_printables(self, mock_logger):
+        from bambu_cli.bambu import resolve_printables_url
+
+        url = "https://www.thingiverse.com/thing:12345"
+        download_url, filename = resolve_printables_url(url)
+
+        self.assertIsNone(download_url)
+        self.assertIsNone(filename)
+
+    @patch('bambu_cli.printables.build_safe_opener')
+    @patch('bambu_cli.bambu.logger')
+    def test_resolve_printables_model_not_found(self, mock_logger, mock_safe_opener):
+        mock_urlopen = mock_safe_opener.return_value.open
+        from bambu_cli.bambu import resolve_printables_url
+        import json
+
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps({"data": {"print": None}}).encode()
+        mock_urlopen.return_value.__enter__.return_value = mock_response
+
+        url = "https://www.printables.com/model/12345-test-model"
+        download_url, filename = resolve_printables_url(url)
+
+        self.assertIsNone(download_url)
+        self.assertIsNone(filename)
+
+        self.assertTrue(any("Model #12345 not found on Printables" in call[0][0] for call in mock_logger.error.call_args_list))
+
+    @patch('bambu_cli.printables.build_safe_opener')
+    @patch('bambu_cli.bambu.logger')
+    def test_resolve_printables_no_valid_files(self, mock_logger, mock_safe_opener):
+        mock_urlopen = mock_safe_opener.return_value.open
+        from bambu_cli.bambu import resolve_printables_url
+        import json
+
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps({
+            "data": {
+                "print": {
+                    "name": "Test Model",
+                    "stls": [],
+                    "gcodes": []
+                }
+            }
+        }).encode()
+        mock_urlopen.return_value.__enter__.return_value = mock_response
+
+        url = "https://www.printables.com/model/12345-test-model"
+        download_url, filename = resolve_printables_url(url)
+
+        self.assertIsNone(download_url)
+        self.assertIsNone(filename)
+
+        self.assertTrue(any("No STL, STEP, or 3MF files found for this model" in call[0][0] for call in mock_logger.error.call_args_list))
+
+    @patch('bambu_cli.printables.build_safe_opener')
+    @patch('bambu_cli.bambu.logger')
+    def test_resolve_printables_prioritize_step(self, mock_logger, mock_safe_opener):
+        mock_urlopen = mock_safe_opener.return_value.open
+        from bambu_cli.bambu import resolve_printables_url
+        import json
+
+        mock_response_1 = MagicMock()
+        mock_response_1.read.return_value = json.dumps({
+            "data": {
+                "print": {
+                    "name": "Test Model",
+                    "stls": [{"name": "part1.step", "fileSize": 1024, "id": "file_123"}],
+                    "gcodes": []
+                }
+            }
+        }).encode()
+
+        mock_response_2 = MagicMock()
+        mock_response_2.read.return_value = json.dumps({
+            "data": {
+                "getDownloadLink": {
+                    "ok": True,
+                    "output": {"link": "https://download.example.com/part1.step"}
+                }
+            }
+        }).encode()
+
+        mock_urlopen.return_value.__enter__.side_effect = [mock_response_1, mock_response_2]
+
+        url = "https://www.printables.com/model/12345-test-model"
+        download_url, filename = resolve_printables_url(url)
+
+        self.assertEqual(download_url, "https://download.example.com/part1.step")
+        self.assertEqual(filename, "part1.step")
+
+        self.assertTrue(any("→ Using STEP: part1.step (1KB)" in call[0][0] for call in mock_logger.info.call_args_list))
+
+    @patch('bambu_cli.printables.build_safe_opener')
+    @patch('bambu_cli.bambu.logger')
+    def test_resolve_printables_prioritize_3mf(self, mock_logger, mock_safe_opener):
+        mock_urlopen = mock_safe_opener.return_value.open
+        from bambu_cli.bambu import resolve_printables_url
+        import json
+
+        mock_response_1 = MagicMock()
+        mock_response_1.read.return_value = json.dumps({
+            "data": {
+                "print": {
+                    "name": "Test Model",
+                    "stls": [],
+                    "gcodes": [{"name": "part1.3mf", "fileSize": 1024, "id": "file_123"}]
+                }
+            }
+        }).encode()
+
+        mock_response_2 = MagicMock()
+        mock_response_2.read.return_value = json.dumps({
+            "data": {
+                "getDownloadLink": {
+                    "ok": True,
+                    "output": {"link": "https://download.example.com/part1.3mf"}
+                }
+            }
+        }).encode()
+
+        mock_urlopen.return_value.__enter__.side_effect = [mock_response_1, mock_response_2]
+
+        url = "https://www.printables.com/model/12345-test-model"
+        download_url, filename = resolve_printables_url(url)
+
+        self.assertEqual(download_url, "https://download.example.com/part1.3mf")
+        self.assertEqual(filename, "part1.3mf")
+
+        self.assertTrue(any("falling back to 3MF" in call[0][0] for call in mock_logger.warning.call_args_list))
+        self.assertTrue(any("→ Using 3MF: part1.3mf (1KB)" in call[0][0] for call in mock_logger.info.call_args_list))
+
+    @patch('bambu_cli.printables.build_safe_opener')
+    @patch('bambu_cli.bambu.logger')
+    def test_resolve_printables_download_link_error(self, mock_logger, mock_safe_opener):
+        mock_urlopen = mock_safe_opener.return_value.open
+        from bambu_cli.bambu import resolve_printables_url
+        import json
+
+        mock_response_1 = MagicMock()
+        mock_response_1.read.return_value = json.dumps({
+            "data": {
+                "print": {
+                    "name": "Test Model",
+                    "stls": [{"name": "part1.stl", "fileSize": 1024, "id": "file_123"}],
+                    "gcodes": []
+                }
+            }
+        }).encode()
+
+        mock_response_2 = MagicMock()
+        mock_response_2.read.return_value = json.dumps({
+            "data": {
+                "getDownloadLink": {
+                    "ok": False,
+                    "errors": [{"field": "link", "messages": ["Download limit reached"]}]
+                }
+            }
+        }).encode()
+
+        mock_urlopen.return_value.__enter__.side_effect = [mock_response_1, mock_response_2]
+
+        url = "https://www.printables.com/model/12345-test-model"
+        download_url, filename = resolve_printables_url(url)
+
+        self.assertIsNone(download_url)
+        self.assertIsNone(filename)
+
+        self.assertTrue(any("Failed to get download link: Download limit reached" in call[0][0] for call in mock_logger.error.call_args_list))
+
+    @patch('bambu_cli.printables.build_safe_opener')
+    @patch('bambu_cli.bambu.logger')
+    def test_resolve_printables_exception(self, mock_logger, mock_safe_opener):
+        mock_urlopen = mock_safe_opener.return_value.open
+        from bambu_cli.bambu import resolve_printables_url
+
+        mock_urlopen.return_value.__enter__.side_effect = urllib.error.URLError("Network failure")
+
+        url = "https://www.printables.com/model/12345-test-model"
+        download_url, filename = resolve_printables_url(url)
+
+        self.assertIsNone(download_url)
+        self.assertIsNone(filename)
+
+        self.assertTrue(any("Network error querying Printables API" in call[0][0] for call in mock_logger.error.call_args_list))
+
+
+class TestBambuCmdDownload(unittest.TestCase):
+
+    @patch('bambu_cli.bambu.logger')
+    def test_cmd_download_invalid_output_dir(self, mock_logger):
+        from bambu_cli.bambu import cmd_download
+        args = MagicMock()
+        args.url = "http://example.com/test.stl"
+        args.output = "-invalid_dir"
+
+        with self.assertRaises(SystemExit) as cm:
+            cmd_download(args)
+        self.assertEqual(cm.exception.code, 5)
+
+        mock_logger.error.assert_called_with("Invalid output directory: -invalid_dir")
+
+    @patch('urllib.request.Request')
+    @patch('bambu_cli.download.build_safe_opener')
+    @patch('bambu_cli.bambu.logger')
+    @patch('builtins.open', new_callable=mock_open)
+    def test_cmd_download_sanitization_fallback(self, mock_file, mock_logger, mock_build, mock_req):
+        from bambu_cli.bambu import cmd_download
+        import urllib.request
+
+        args = MagicMock()
+        # Create a URL where os.path.basename(unquote(path)) evaluates to something invalid
+        # For instance, URL path is just /.. or /... -> basename evaluates to ..
+        args.url = "http://example.com/.."
+        args.output = "/tmp/out"
+        args.name = None
+
+        mock_opener = MagicMock()
+        mock_build.return_value = mock_opener
+        mock_resp = MagicMock()
+        mock_resp.read.side_effect = [b"data", b""]
+        mock_opener.open.return_value.__enter__.return_value = mock_resp
+
+        cmd_download(args)
+
+        # Path should fall back to model.stl, then get appended to output
+        mock_file.assert_called_with(os.path.join("/tmp/out", "model.stl"), 'wb')
+        mock_logger.info.assert_any_call("⬇️  Downloading model.stl...")
+    def setUp(self):
+        self.safe_opener_patcher = patch('bambu_cli.download.build_safe_opener')
+        self.mock_safe_opener = self.safe_opener_patcher.start()
+        self.mock_safe_opener.return_value.open = MagicMock()
+        self.exists_patcher = patch('os.path.exists', return_value=False)
+        self.mock_exists = self.exists_patcher.start()
+        self.getsize_patcher = patch('os.path.getsize', return_value=1024)
+        self.mock_getsize = self.getsize_patcher.start()
+        # These tests mock the filesystem, so collision-avoidance (which
+        # creates real placeholder files) must be a pass-through.
+        self.noncolliding_patcher = patch(
+            'bambu_cli.download._noncolliding_path', side_effect=lambda p: p)
+        self.noncolliding_patcher.start()
+
+    def tearDown(self):
+        self.safe_opener_patcher.stop()
+        self.exists_patcher.stop()
+        self.getsize_patcher.stop()
+        self.noncolliding_patcher.stop()
+
+
+    @patch('bambu_cli.download.resolve_printables_url')
+    @patch('bambu_cli.download.build_safe_opener')
+    @patch('os.path.getsize')
+    @patch('builtins.open', new_callable=unittest.mock.mock_open)
+    @patch('bambu_cli.bambu.logger')
+    def test_cmd_download_with_printables_url(self, mock_logger, mock_open, mock_getsize, mock_safe_opener, mock_resolve):
+        mock_urlopen = mock_safe_opener.return_value.open
+        from bambu_cli.bambu import cmd_download
+
+        # Mock resolve to return a resolved URL and filename
+        mock_resolve.return_value = ("https://download.example.com/part1.stl", "part1.stl")
+
+        args = MagicMock()
+        args.url = "https://www.printables.com/model/12345"
+        args.output = "."
+        args.name = None
+
+        mock_response = MagicMock()
+        mock_response.read.side_effect = [b"test data", b""]
+        self.mock_safe_opener.return_value.open.return_value.__enter__.return_value = mock_response
+        mock_urlopen.return_value.__enter__.return_value = mock_response
+
+        mock_getsize.return_value = 1024
+
+        cmd_download(args)
+
+        mock_resolve.assert_called_once_with("https://www.printables.com/model/12345")
+        mock_urlopen.assert_called_once()
+
+        # Check success message
+        self.assertTrue(any("✅ Downloaded: ./part1.stl" in call[0][0] for call in mock_logger.info.call_args_list))
+
+    @patch('bambu_cli.download.resolve_printables_url')
+    @patch('bambu_cli.download.build_safe_opener')
+    @patch('os.path.getsize')
+    @patch('builtins.open', new_callable=unittest.mock.mock_open)
+    @patch('bambu_cli.bambu.logger')
+    def test_cmd_download_direct_url_success(self, mock_logger, mock_open, mock_getsize, mock_safe_opener, mock_resolve):
+        mock_urlopen = mock_safe_opener.return_value.open
+        from bambu_cli.bambu import cmd_download
+
+        args = MagicMock()
+        args.url = "https://example.com/model.stl"
+        args.output = "."
+        args.name = None
+
+        mock_resolve.return_value = (None, None)
+
+        mock_response = MagicMock()
+        mock_response.read.side_effect = [b"test data", b""]
+        self.mock_safe_opener.return_value.open.return_value.__enter__.return_value = mock_response
+        mock_urlopen.return_value.__enter__.return_value = mock_response
+
+        mock_getsize.return_value = 1024
+
+        cmd_download(args)
+
+        mock_resolve.assert_called_once_with("https://example.com/model.stl")
+        mock_urlopen.assert_called_once()
+
+        # Check success message
+        self.assertTrue(any("✅ Downloaded: ./model.stl (1KB)" in call[0][0] for call in mock_logger.info.call_args_list))
+
+    @patch('bambu_cli.download.resolve_printables_url')
+    @patch('bambu_cli.download.build_safe_opener')
+    @patch('os.path.getsize')
+    @patch('builtins.open', new_callable=unittest.mock.mock_open)
+    @patch('bambu_cli.bambu.logger')
+    def test_cmd_download_custom_name(self, mock_logger, mock_open, mock_getsize, mock_safe_opener, mock_resolve):
+        mock_urlopen = mock_safe_opener.return_value.open
+        from bambu_cli.bambu import cmd_download
+
+        args = MagicMock()
+        args.url = "https://example.com/model.stl"
+        args.output = "."
+        args.name = "custom.stl"
+
+        mock_resolve.return_value = (None, None)
+
+        mock_response = MagicMock()
+        mock_response.read.side_effect = [b"test data", b""]
+        self.mock_safe_opener.return_value.open.return_value.__enter__.return_value = mock_response
+        mock_urlopen.return_value.__enter__.return_value = mock_response
+
+        mock_getsize.return_value = 1024
+
+        cmd_download(args)
+
+        mock_resolve.assert_called_once_with("https://example.com/model.stl")
+        mock_urlopen.assert_called_once()
+
+        # Check success message
+        self.assertTrue(any("✅ Downloaded: ./custom.stl (1KB)" in call[0][0] for call in mock_logger.info.call_args_list))
+
+    @patch('bambu_cli.download.resolve_printables_url')
+    @patch('bambu_cli.download.build_safe_opener')
+    @patch('bambu_cli.bambu.logger')
+    def test_cmd_download_printables_fail(self, mock_logger, mock_safe_opener, mock_resolve):
+        mock_urlopen = mock_safe_opener.return_value.open
+        from bambu_cli.bambu import cmd_download
+
+        args = MagicMock()
+        args.url = "https://www.printables.com/model/12345"
+        args.output = "."
+        args.name = None
+
+        mock_resolve.return_value = (None, None)
+
+        with self.assertRaises(SystemExit) as cm:
+            cmd_download(args)
+        self.assertEqual(cm.exception.code, 5)
+
+        mock_resolve.assert_called_once_with("https://www.printables.com/model/12345")
+        mock_urlopen.assert_not_called()
+
+    @patch('bambu_cli.download.resolve_printables_url')
+    @patch('bambu_cli.download.build_safe_opener')
+    @patch('bambu_cli.bambu.logger')
+    def test_cmd_download_http_error(self, mock_logger, mock_safe_opener, mock_resolve):
+        mock_urlopen = mock_safe_opener.return_value.open
+        from bambu_cli.bambu import cmd_download
+        import urllib.error
+
+        args = MagicMock()
+        args.url = "https://example.com/model.stl"
+        args.output = "."
+        args.name = None
+
+        mock_resolve.return_value = (None, None)
+
+        mock_urlopen.side_effect = urllib.error.HTTPError(url="https://example.com/model.stl", code=404, msg="Not Found", hdrs={}, fp=None)
+
+        with self.assertRaises(SystemExit) as cm:
+            cmd_download(args)
+        self.assertEqual(cm.exception.code, 2)
+
+        mock_resolve.assert_called_once_with("https://example.com/model.stl")
+        mock_urlopen.assert_called_once()
+
+        self.assertTrue(any("Download failed: HTTP Error 404" in call[0][0] for call in mock_logger.error.call_args_list))
+
+    @patch('bambu_cli.download.resolve_printables_url')
+    @patch('bambu_cli.download.build_safe_opener')
+    @patch('bambu_cli.bambu.logger')
+    def test_cmd_download_generic_error(self, mock_logger, mock_safe_opener, mock_resolve):
+        mock_urlopen = mock_safe_opener.return_value.open
+        from bambu_cli.bambu import cmd_download
+
+        args = MagicMock()
+        args.url = "https://example.com/model.stl"
+        args.output = "."
+        args.name = None
+
+        mock_resolve.return_value = (None, None)
+
+        mock_urlopen.side_effect = urllib.error.URLError("Connection refused")
+
+        with self.assertRaises(SystemExit) as cm:
+            cmd_download(args)
+        self.assertEqual(cm.exception.code, 2)
+
+        mock_resolve.assert_called_once_with("https://example.com/model.stl")
+        mock_urlopen.assert_called_once()
+
+        self.assertTrue(any("Network error during download: <urlopen error Connection refused>" in call[0][0] for call in mock_logger.error.call_args_list))
+
+    @patch('bambu_cli.download.resolve_printables_url')
+    @patch('bambu_cli.download.build_safe_opener')
+    @patch('os.path.getsize')
+    @patch('builtins.open', new_callable=unittest.mock.mock_open)
+    @patch('bambu_cli.bambu.logger')
+    def test_cmd_download_missing_extension(self, mock_logger, mock_open, mock_getsize, mock_safe_opener, mock_resolve):
+        mock_urlopen = mock_safe_opener.return_value.open
+        from bambu_cli.bambu import cmd_download
+
+        args = MagicMock()
+        args.url = "https://example.com/model"
+        args.output = "."
+        args.name = None
+
+        mock_resolve.return_value = (None, None)
+
+        mock_response = MagicMock()
+        mock_response.read.side_effect = [b"test data", b""]
+        self.mock_safe_opener.return_value.open.return_value.__enter__.return_value = mock_response
+        mock_urlopen.return_value.__enter__.return_value = mock_response
+
+        mock_getsize.return_value = 1024
+
+        cmd_download(args)
+
+        mock_resolve.assert_called_once_with("https://example.com/model")
+        mock_urlopen.assert_called_once()
+
+        # Check success message with .stl appended
+        self.assertTrue(any("✅ Downloaded: ./model.stl (1KB)" in call[0][0] for call in mock_logger.info.call_args_list))
+
+    @patch('bambu_cli.download.resolve_printables_url')
+    @patch('bambu_cli.download.build_safe_opener')
+    @patch('bambu_cli.bambu.logger')
+    def test_cmd_download_invalid_scheme(self, mock_logger, mock_safe_opener, mock_resolve):
+        mock_urlopen = mock_safe_opener.return_value.open
+        from bambu_cli.bambu import cmd_download
+
+        args = MagicMock()
+        args.url = "file:///etc/passwd"
+        args.output = "."
+        args.name = None
+
+        mock_resolve.return_value = (None, None)
+
+        with self.assertRaises(SystemExit) as cm:
+            cmd_download(args)
+        self.assertEqual(cm.exception.code, 5)
+
+        # urllib.request.urlopen should NOT be called
+        mock_urlopen.assert_not_called()
+
+        # Check for invalid scheme error message
+        self.assertTrue(any("Invalid URL scheme: file" in call[0][0] for call in mock_logger.error.call_args_list))
+
+    @patch('bambu_cli.download.resolve_printables_url')
+    @patch('bambu_cli.download.build_safe_opener')
+    @patch('os.path.getsize')
+    @patch('builtins.open', new_callable=unittest.mock.mock_open)
+    @patch('bambu_cli.bambu.logger')
+    def test_cmd_download_path_traversal_sanitization(self, mock_logger, mock_open, mock_getsize, mock_safe_opener, mock_resolve):
+        mock_urlopen = mock_safe_opener.return_value.open
+        from bambu_cli.bambu import cmd_download
+
+        # A URL containing an encoded path traversal attempt
+        args = MagicMock()
+        args.url = "https://example.com/models/file.stl%2f..%2f..%2fetc%2fpasswd"
+        args.output = "/tmp"
+        args.name = None
+
+        mock_resolve.return_value = (None, None)
+        mock_response = MagicMock()
+        mock_response.read.side_effect = [b"test data", b""]
+        self.mock_safe_opener.return_value.open.return_value.__enter__.return_value = mock_response
+        mock_urlopen.return_value.__enter__.return_value = mock_response
+        mock_getsize.return_value = 1024
+
+        cmd_download(args)
+
+        expected_filename = "passwd.stl"
+        expected_path = os.path.join("/tmp", expected_filename)
+
+        # open() is called with the sanitized native path (native separators).
+        mock_open.assert_called_once_with(expected_path, 'wb')
+
+        # The success log normalizes separators to '/' via _path_for_message, so
+        # compare against a separately-normalized display string. This keeps the
+        # native-path mock_open check above intact while matching the log on Windows.
+        expected_display = expected_path.replace(os.sep, "/")
+        self.assertTrue(any(f"✅ Downloaded: {expected_display}" in call[0][0] for call in mock_logger.info.call_args_list))
+
+
+if __name__ == '__main__':
+    unittest.main()

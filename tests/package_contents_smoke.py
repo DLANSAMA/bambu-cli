@@ -31,7 +31,15 @@ REQUIRED_SDIST_FILES = {
     "tests/privacy_smoke.py",
     "tests/python_compat_smoke.py",
     "tests/release_readiness_smoke.py",
-    "tests/test_bambu.py",
+    "tests/bambu_test_base.py",
+    "tests/test_config_and_logging.py",
+    "tests/test_protocol_clients.py",
+    "tests/test_cli_entry.py",
+    "tests/test_printer_commands.py",
+    "tests/test_slice_cmd.py",
+    "tests/test_download_cmd.py",
+    "tests/test_camera_cmd.py",
+    "tests/test_doctor_and_safety.py",
 }
 
 REQUIRED_WHEEL_FILES = {
