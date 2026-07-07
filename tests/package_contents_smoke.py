@@ -145,10 +145,10 @@ def _metadata_name():
 
 
 def _cli_version():
-    text = Path("bambu_cli/bambu.py").read_text(encoding="utf-8")
+    text = Path("bambu_cli/constants.py").read_text(encoding="utf-8")
     match = re.search(r'^VERSION\s*=\s*"([^"]+)"', text, re.MULTILINE)
     if not match:
-        raise SystemExit("bambu_cli/bambu.py is missing VERSION")
+        raise SystemExit("bambu_cli/constants.py is missing VERSION")
     return match.group(1)
 
 

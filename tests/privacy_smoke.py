@@ -106,7 +106,7 @@ def local_identity_patterns():
     patterns = {
         "email address": re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"),
         "credential-bearing URL": re.compile(r"\b[A-Za-z][A-Za-z0-9+.-]*://[^\s/@]+:[^\s/@]+@[^\s/]+\b"),
-        "OpenAI API key": re.compile(r"sk-[A-Za-z0-9]{20,}"),
+        "OpenAI API key": re.compile(r"(?<![A-Za-z0-9])sk-[A-Za-z0-9]{20,}"),
         "AWS access key": re.compile(r"AKIA[0-9A-Z]{16}"),
         "private key": re.compile("BEGIN " + r"(?:RSA|OPENSSH|EC|PRIVATE) KEY"),
     }
