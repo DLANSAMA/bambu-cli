@@ -14,7 +14,6 @@ import urllib.request
 from urllib.parse import urlparse
 
 from bambu_cli.constants import (
-    CAMERA_CONTAINER_NAME,
     DEFAULT_NETWORK_TIMEOUT,
     EXIT_COMMAND_ERROR,
     EXIT_CONFIG_ERROR,
@@ -156,7 +155,7 @@ def _cmd_snapshot(args):
         emit_json_error(args, "snapshot", EXIT_CONFIG_ERROR, message, failed_step="docker", output=outpath)
         sys.exit(EXIT_CONFIG_ERROR)
     try:
-        check = subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}", CAMERA_CONTAINER_NAME],
+        check = subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}", bambu.CAMERA_CONTAINER_NAME],
             capture_output=True, text=True, timeout=5)
     except (FileNotFoundError, subprocess.SubprocessError) as e:
         message = f"Docker not reachable (is the daemon running?): {e}"
@@ -171,8 +170,8 @@ def _cmd_snapshot(args):
         # in argv, so the secret never appears in the process list (`ps`).
         docker_env = {**os.environ, "PRINTER_ACCESS_CODE": access_code}
         try:
-            subprocess.run(["docker", "rm", "-f", CAMERA_CONTAINER_NAME], capture_output=True, timeout=5)
-            run = subprocess.run(["docker", "run", "-d", "--name", CAMERA_CONTAINER_NAME, "-p", bambu.CAMERA_PORT,
+            subprocess.run(["docker", "rm", "-f", bambu.CAMERA_CONTAINER_NAME], capture_output=True, timeout=5)
+            run = subprocess.run(["docker", "run", "-d", "--name", bambu.CAMERA_CONTAINER_NAME, "-p", bambu.CAMERA_PORT,
                 "-e", f"PRINTER_ADDRESS={bambu.PRINTER_IP}",
                 "-e", "PRINTER_ACCESS_CODE",
                 camera_image], capture_output=True, timeout=10, env=docker_env)

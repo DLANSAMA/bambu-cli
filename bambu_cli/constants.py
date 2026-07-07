@@ -76,8 +76,3 @@ PRINTER_CONFIG_COMMANDS = {
 }
 LOCAL_COMMANDS = {"slice", "download", "preflight", "setup"}
 PRINTER_NETWORK_COMMANDS = PRINTER_CONFIG_COMMANDS - LOCAL_COMMANDS
-
-# Camera defaults
-CAMERA_CONTAINER_NAME = "bambu_camera"
-CAMERA_DEFAULT_IMAGE = "bambu_p1_streamer"
-CAMERA_DEFAULT_PORT = "1985:1984"
