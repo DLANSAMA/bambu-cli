@@ -2,6 +2,7 @@ import contextlib
 import ftplib
 import logging
 import os
+import random
 import ssl
 import time
 from typing import Optional, Dict, Any
@@ -63,28 +64,73 @@ class BambuPrinter:
             except (*ftplib.all_errors, ssl.SSLError):
                 pass
 
-    def upload_file(self, local_path: str, remote_path: str, timeout: Optional[float] = None, progress_callback=None, on_resume=None) -> bool:
-        """Upload a file via FTPS."""
+    def _probe_remote_size(self, ftp, remote_path: str) -> Optional[int]:
+        """Best-effort remote file size lookup. Returns None if unavailable."""
+        try:
+            size = ftp.size(remote_path)
+            return int(size) if size is not None else None
+        except (*ftplib.all_errors, ssl.SSLError, TypeError, ValueError):
+            return None
+
+    def _backoff_delay(self, attempt: int) -> float:
+        """Exponential backoff with jitter, in seconds."""
+        base = min(5 * (2 ** attempt), 30)
+        return base + random.uniform(0, base * 0.25)
+
+    def _delete_remote_quiet(self, ftp, remote_path: str) -> None:
+        try:
+            ftp.delete(remote_path)
+        except ftplib.all_errors:
+            pass
+
+    def upload_file(self, local_path: str, remote_path: str, timeout: Optional[float] = None, progress_callback=None, on_resume=None, sleep=time.sleep) -> bool:
+        """Upload a file via FTPS as a verified state machine: (fresh|probe) -> (resume|restart) -> transfer -> verify."""
         filesize = os.path.getsize(local_path)
         max_retries = 3
         uploaded_bytes = 0
+        attempted_transfer = False
 
         for attempt in range(max_retries + 1):
             try:
                 with self.get_ftp_client(timeout=timeout or self.ftps_timeout) as ftp:
                     if attempt == 0:
-                        try:
-                            ftp.delete(remote_path)
-                        except ftplib.all_errors:
-                            pass
+                        self._delete_remote_quiet(ftp, remote_path)
                     with open(local_path, 'rb') as f:
                         if uploaded_bytes > 0:
                             logger.info(f"🔄 Resuming from {uploaded_bytes // 1024}KB...")
                             if on_resume:
                                 on_resume(uploaded_bytes)
                             f.seek(uploaded_bytes)
+                        attempted_transfer = True
                         ftp.storbinary(f'STOR {remote_path}', f, blocksize=1048576, rest=uploaded_bytes if uploaded_bytes > 0 else None, callback=progress_callback)
-                    return True
+
+                    # Transfer completed without raising; verify before trusting it.
+                    remote_size = self._probe_remote_size(ftp, remote_path)
+                    if remote_size is None:
+                        # Server doesn't support SIZE (or it failed) after a successful STOR.
+                        # Don't turn flaky SIZE support into a new failure mode.
+                        logger.warning(f"⚠️ Could not verify remote size for {remote_path}; assuming upload succeeded.")
+                        return True
+                    if remote_size == filesize:
+                        return True
+
+                    # Sizes disagree even though STOR didn't raise; treat as a failed
+                    # attempt and retry rather than declaring success on garbage data.
+                    logger.warning(f"⚠️ Upload attempt {attempt + 1} failed: size mismatch (remote {remote_size}, expected {filesize})")
+                    if remote_size < filesize:
+                        uploaded_bytes = remote_size
+                    else:
+                        # Impossible state (remote larger than local); restart from zero.
+                        self._delete_remote_quiet(ftp, remote_path)
+                        uploaded_bytes = 0
+                    if attempt < max_retries:
+                        delay = self._backoff_delay(attempt)
+                        logger.info(f"   Retrying in {delay:.1f}s...")
+                        sleep(delay)
+                        continue
+                    else:
+                        logger.error(f"Upload failed: size mismatch after {max_retries + 1} attempts")
+                        return False
             except ftplib.error_perm as e:
                 # Permanent errors (530 bad access code, 550 permission denied)
                 # will not succeed on retry; fail fast with a clear message.
@@ -97,19 +143,32 @@ class BambuPrinter:
             except (*ftplib.all_errors, ssl.SSLError) as e:
                 if attempt < max_retries:
                     logger.warning(f"⚠️ Upload attempt {attempt + 1} failed: {e}")
-                    # Attempt to get remote size for resume
+                    # Probe remote size to decide whether to resume, restart, or shortcut.
                     try:
                         with self.get_ftp_client(timeout=5) as ftp_check:
-                            size = ftp_check.size(remote_path)
-                            remote_size = int(size) if size is not None else 0
-                            if remote_size == filesize:
-                                logger.info(f"✅ Uploaded {remote_path} ({filesize // 1024}KB, verified remotely)")
-                                return True
-                            uploaded_bytes = remote_size
+                            remote_size = self._probe_remote_size(ftp_check, remote_path)
+                            if remote_size is not None:
+                                if remote_size == filesize:
+                                    if attempted_transfer:
+                                        logger.info(f"✅ Uploaded {remote_path} ({filesize // 1024}KB, verified remotely)")
+                                        return True
+                                    # Same-size remote file but we haven't actually
+                                    # transferred anything yet this run (e.g. the
+                                    # attempt-0 delete failed silently) — don't trust
+                                    # a stale file; restart the transfer from zero.
+                                    self._delete_remote_quiet(ftp_check, remote_path)
+                                    uploaded_bytes = 0
+                                elif remote_size > filesize:
+                                    # Impossible state; restart from zero.
+                                    self._delete_remote_quiet(ftp_check, remote_path)
+                                    uploaded_bytes = 0
+                                else:
+                                    uploaded_bytes = remote_size
                     except (*ftplib.all_errors, ssl.SSLError):
                         pass
-                    logger.info("   Retrying in 5s...")
-                    time.sleep(5)
+                    delay = self._backoff_delay(attempt)
+                    logger.info(f"   Retrying in {delay:.1f}s...")
+                    sleep(delay)
                 else:
                     logger.error(f"Upload failed: {e}")
                     return False

@@ -10,6 +10,7 @@ from .constants import (
     EXIT_SUCCESS, EXIT_CONFIG_ERROR, EXIT_COMMAND_ERROR, DEFAULT_MAX_DOWNLOAD_MB,
     PRINTER_NETWORK_COMMANDS,
 )
+from .errors import BambuError
 
 
 # Logging
@@ -407,6 +408,11 @@ def main():
     if bambu.SIMULATION_MODE:
         logger.info("🤖 Simulation mode enabled.")
 
+    bambu.load_config(exit_on_fail=False)
+
+    from bambu_cli import context as _context
+    _context.set_current(_context.RuntimeContext.from_globals(args))
+
     if _json_setup_should_be_noninteractive(args):
         bambu._cmd_setup_noninteractive(args)
         return
@@ -442,6 +448,23 @@ def main():
         except (KeyboardInterrupt, EOFError):
             print("\nOperation cancelled by user.")
             sys.exit(EXIT_COMMAND_ERROR)
+        except BambuError as exc:
+            logger.error(str(exc), exc_info=True)
+            if _json_mode_requested(args) and not utils._JSON_EMITTED:
+                extra = {}
+                if exc.detail:
+                    extra["detail"] = exc.detail
+                if exc.next_command:
+                    extra["next_command"] = exc.next_command
+                emit_json_error(
+                    args,
+                    args.cmd,
+                    exc.exit_code,
+                    str(exc),
+                    failed_step=exc.failed_step,
+                    **extra,
+                )
+            sys.exit(exc.exit_code)
         except Exception as exc:
             logger.error(f"Uncaught exception: {exc}", exc_info=True)
             if _json_mode_requested(args) and not utils._JSON_EMITTED:

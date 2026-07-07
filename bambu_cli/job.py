@@ -7,6 +7,8 @@ import shutil
 import sys
 import tempfile
 import zipfile
+from dataclasses import dataclass
+from typing import Callable, Optional
 from urllib.parse import quote, urlparse
 
 from bambu_cli.constants import (
@@ -48,6 +50,57 @@ from bambu_cli.download import (
     _unsupported_download_message,
     _validate_http_url_or_exit,
 )
+
+
+def _default_download():
+    from bambu_cli import bambu
+    return bambu.cmd_download
+
+
+def _default_slice():
+    from bambu_cli import bambu
+    return bambu.cmd_slice
+
+
+def _default_upload():
+    from bambu_cli import bambu
+    return bambu.cmd_upload
+
+
+def _default_print():
+    from bambu_cli import bambu
+    return bambu.cmd_print
+
+
+@dataclass
+class JobSteps:
+    """Injectable step callables for the job/send orchestrator.
+
+    Each field defaults to a zero-arg factory that late-binds to the real
+    implementation through the ``bambu`` facade at call time, so existing
+    tests/callers that patch ``bambu.cmd_download`` (etc.) keep working even
+    when a caller doesn't supply its own ``JobSteps``.
+    """
+
+    download: Optional[Callable] = None
+    slice: Optional[Callable] = None
+    upload: Optional[Callable] = None
+    print_: Optional[Callable] = None
+
+    def _resolve(self, value, default_factory):
+        return value if value is not None else default_factory()
+
+    def get_download(self):
+        return self._resolve(self.download, _default_download)
+
+    def get_slice(self):
+        return self._resolve(self.slice, _default_slice)
+
+    def get_upload(self):
+        return self._resolve(self.upload, _default_upload)
+
+    def get_print(self):
+        return self._resolve(self.print_, _default_print)
 
 
 def _print_next_command(args, basename):
@@ -216,11 +269,19 @@ def _validate_predicted_remote_name_or_fail(args, summary, remote_name, message_
         )
 
 
-def _last_error_for(command):
+def _last_error_for(command, ctx=None):
+    """Return the last-error payload for ``command``, dual-writing it onto
+    ``ctx.last_error`` when a RuntimeContext is supplied.
+
+    The legacy global (``utils._LAST_ERROR_PAYLOAD``) remains the source of
+    truth that step implementations write to; ``ctx.last_error`` is a typed
+    mirror for callers migrating away from the module global.
+    """
     payload = utils._LAST_ERROR_PAYLOAD
-    if isinstance(payload, dict) and payload.get("command") == command:
-        return payload
-    return None
+    result = payload if isinstance(payload, dict) and payload.get("command") == command else None
+    if ctx is not None:
+        ctx.last_error = result
+    return result
 
 
 def _prepare_job_output_dir(args, summary):
@@ -264,8 +325,15 @@ def _prepare_job_output_dir(args, summary):
 
 
 def _cmd_job(args):
+    """Public entry point shim: builds a RuntimeContext/JobSteps and delegates."""
+    from bambu_cli.context import get_current
+    return _run_job(get_current(), args, JobSteps())
+
+
+def _run_job(ctx, args, steps=None):
     """Agent-friendly one-shot workflow: URL/local file -> slice if needed -> upload -> optional print."""
-    from bambu_cli import bambu
+    if steps is None:
+        steps = JobSteps()
     from bambu_cli.slicer import _is_directory_input, _directory_input_message, _validate_slice_options
     source_arg = args.source
     source = _normalize_url_input(source_arg)
@@ -374,7 +442,7 @@ def _cmd_job(args):
             try:
                 utils._LAST_ERROR_PAYLOAD = None
                 utils._LAST_DOWNLOAD_PAYLOAD = None
-                download_path = bambu.cmd_download(argparse.Namespace(
+                download_path = steps.get_download()(argparse.Namespace(
                     url=source,
                     output=workdir,
                     name=getattr(args, 'name', None),
@@ -383,7 +451,7 @@ def _cmd_job(args):
                     progress=not getattr(args, "json", False),
                 ))
             except SystemExit as exc:
-                detail = _last_error_for("download")
+                detail = _last_error_for("download", ctx)
                 _emit_job_failure(
                     args,
                     summary,
@@ -496,10 +564,10 @@ def _cmd_job(args):
                 return source_path
             try:
                 utils._LAST_ERROR_PAYLOAD = None
-                printable_path = bambu.cmd_slice(_slice_args_for_job(source_path, args, workdir))
+                printable_path = steps.get_slice()(_slice_args_for_job(source_path, args, workdir))
             except SystemExit as exc:
                 summary["printable_path"] = source_path
-                detail = _last_error_for("slice")
+                detail = _last_error_for("slice", ctx)
                 _emit_job_failure(
                     args,
                     summary,
@@ -550,11 +618,11 @@ def _cmd_job(args):
 
         try:
             utils._LAST_ERROR_PAYLOAD = None
-            remote_name = bambu.cmd_upload(argparse.Namespace(
+            remote_name = steps.get_upload()(argparse.Namespace(
                 file=printable_path, dry_run=False, json=False,
                 progress=not getattr(args, "json", False)))
         except SystemExit as exc:
-            detail = _last_error_for("upload")
+            detail = _last_error_for("upload", ctx)
             _emit_job_failure(
                 args,
                 summary,
@@ -586,7 +654,7 @@ def _cmd_job(args):
         summary["would_print"] = True
         try:
             utils._LAST_ERROR_PAYLOAD = None
-            bambu.cmd_print(argparse.Namespace(
+            steps.get_print()(argparse.Namespace(
                 file=remote_name,
                 confirm=True,
                 dry_run=False,
@@ -598,7 +666,7 @@ def _cmd_job(args):
                 json=False,
             ))
         except SystemExit as exc:
-            detail = _last_error_for("print")
+            detail = _last_error_for("print", ctx)
             summary["next_command"] = ["status", "--json"]
             summary["recovery_hint"] = (
                 "Upload succeeded but print start was not confirmed. Check printer status before retrying."

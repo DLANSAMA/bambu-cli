@@ -243,12 +243,8 @@ from bambu_cli.protocols.mqtt import (
     _get_and_verify_cert_pem,
     _SimMqttClient,
 )
-
-# Load config at import-time to populate _cfg for tests that mock config.json at import time
-try:
-    load_config(exit_on_fail=False)
-except Exception:
-    pass
+from bambu_cli.errors import *
+from bambu_cli.context import Settings, RuntimeContext, get_current
 
 class DynamicCmds(dict):
     """Resolve command handlers through this module so tests can patch cmd_*."""

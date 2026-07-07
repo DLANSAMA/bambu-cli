@@ -356,7 +356,8 @@ class TestMain(unittest.TestCase):
     def test_main_invalid_printer_ip(self, mock_getaddrinfo, mock_exit, mock_logger):
         import bambu_cli.bambu
         mock_exit.side_effect = SystemExit(1)
-        with patch('bambu_cli.bambu.PRINTER_IP', 'invalid_ip'):
+        with patch('bambu_cli.bambu.PRINTER_IP', 'invalid_ip'), \
+                patch('bambu_cli.bambu.load_config', return_value=None):
             with self.assertRaises(SystemExit) as cm:
                 bambu_cli.bambu.main()
 
@@ -575,6 +576,7 @@ class TestBambuCmdUploadEdgeCases(unittest.TestCase):
         mock_ftp1.size.return_value = 1024
 
         mock_ftp2 = MagicMock()
+        mock_ftp2.size.return_value = 2048
 
         mock_get_ftp = MagicMock(side_effect=[
             MagicMock(__enter__=MagicMock(return_value=mock_ftp1)),
@@ -2648,7 +2650,9 @@ class TestBambuUploadRetry(unittest.TestCase):
         mock_ftp = MagicMock()
         # Fail once, then succeed
         mock_ftp.storbinary.side_effect = [OSError("Timeout"), None]
-        mock_ftp.size.return_value = 0
+        # First size() call is the mid-failure resume probe (mismatch keeps
+        # uploaded_bytes at 0); second is the post-success verification.
+        mock_ftp.size.side_effect = [0, 2048]
         mock_get_ftp = MagicMock()
         mock_get_ftp.return_value.__enter__.return_value = mock_ftp
         printer = _test_printer()
@@ -2725,13 +2729,19 @@ class TestBambuSimulation(unittest.TestCase):
 
         from bambu_cli.protocols.ftps import connection_manager
         connection_manager.clear()
-        
+
         bambu.SIMULATION_MODE = True
         try:
-            with patch('os.path.exists', return_value=True), \
-                 patch('os.path.getsize', return_value=1024), \
-                 patch('builtins.open', mock_open(read_data=b"data")):
+            # Use a real file (not mock_open) so _SimFtp's fp.tell()/seek()-based
+            # size bookkeeping — and upload_file's post-transfer size
+            # verification against it — reflect actual byte counts.
+            local_path = os.path.join(os.getcwd(), "test.3mf")
+            with open(local_path, "wb") as f:
+                f.write(b"x" * 1024)
+            try:
                 cmd_upload(args)
+            finally:
+                os.unlink(local_path)
 
             self.assertTrue(any("Connecting to simulated FTPS server" in call[0][0] for call in mock_ftps_logger.info.call_args_list))
             self.assertTrue(any("Uploaded test.3mf to printer" in call[0][0] for call in mock_commands_logger.info.call_args_list))

@@ -64,6 +64,12 @@ from bambu_cli.protocols.ftps import (
 _dns_cache = {}
 _dns_cache_lock = threading.Lock()
 
+# Explicit redirect hop cap. Each hop is independently re-validated (scheme via
+# handler registration, SSRF via _get_safe_connection on the real connect), but
+# without an explicit low cap a malicious/misconfigured server could otherwise
+# chain redirects up to urllib's built-in default of 10.
+MAX_DOWNLOAD_REDIRECT_HOPS = 5
+
 
 def _get_safe_connection(host, port, timeout, source_address):
     """Perform DNS resolution and validate IP is not internal/reserved."""
@@ -134,6 +140,28 @@ class SafeHTTPSConnection(http.client.HTTPSConnection):
             raise
 
 
+class SafeHTTPRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Enforce an explicit, low redirect hop cap with a clear error.
+
+    Each hop still passes through the Safe* connection classes (per-hop SSRF
+    re-validation) and the caller re-checks scheme/extension/content-type on
+    the final URL, but without this the stock handler would allow up to its
+    own default of 10 hops before failing with a generic HTTPError.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        hop_count = getattr(req, "_bambu_redirect_hops", 0) + 1
+        if hop_count > MAX_DOWNLOAD_REDIRECT_HOPS:
+            raise urllib.error.URLError(
+                f"Too many redirects: exceeded the {MAX_DOWNLOAD_REDIRECT_HOPS}-hop "
+                f"limit while fetching {_redact_url_credentials(req.full_url)}"
+            )
+        new_req = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new_req is not None:
+            new_req._bambu_redirect_hops = hop_count
+        return new_req
+
+
 class SafeHTTPHandler(urllib.request.HTTPHandler):
     def http_open(self, req):
         return self.do_open(SafeHTTPConnection, req)
@@ -172,7 +200,7 @@ def build_safe_opener():
     opener.add_handler(urllib.request.ProxyHandler({}))
     opener.add_handler(urllib.request.UnknownHandler())
     opener.add_handler(urllib.request.HTTPDefaultErrorHandler())
-    opener.add_handler(urllib.request.HTTPRedirectHandler())
+    opener.add_handler(SafeHTTPRedirectHandler())
     opener.add_handler(SafeHTTPHandler())
     opener.add_handler(SafeHTTPSHandler())
     return opener
