@@ -1,7 +1,7 @@
 # Test backlog
 
 Prioritized testing gaps after the 2026-07 modular refactor (`bambu.py` split
-into `download.py`, `job.py`, `setup_cmd.py`, `camera.py`, `constants.py`).
+into the `download/` and `setup_cmd/` packages, `job.py`, `camera.py`, `constants.py`).
 All 288 existing tests pass; coverage below is from `pytest --cov=bambu_cli`.
 
 ## Ground rules for new tests
@@ -41,7 +41,7 @@ cover:
 - `--output` handling: created when needed, ignored for printer-ready local
   files, invalid/`-`-prefixed values, temp workdir cleanup.
 
-### P2 — `setup_cmd.py` (35%)
+### P2 — `setup_cmd/` (35% at time of writing, pre-split)
 - Non-interactive setup: each missing-value/placeholder/conflicting-flag
   error payload; `--access-code-env`; existing vs new `--access-code-file`;
   directory and config-path-collision rejections.
@@ -51,7 +51,7 @@ cover:
 - Guided setup: headless-stdin rejection, manual fallback when zeroconf is
   missing (patch the import), multi-printer selection bounds.
 
-### P3 — `download.py` (49%)
+### P3 — `download/` (49% at time of writing, pre-split)
 Existing tests cover the happy paths and SSRF basics. Missing:
 - Redirect handling: redirected URL revalidation, unsupported redirected
   extension, filename recomputation after redirect.

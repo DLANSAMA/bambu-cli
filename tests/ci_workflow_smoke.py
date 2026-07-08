@@ -34,6 +34,7 @@ REQUIRED_SNIPPETS = {
 }
 
 REQUIRED_HELP_COMMANDS = {
+    "config",
     "delete",
     "doctor",
     "download",

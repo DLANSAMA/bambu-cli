@@ -331,6 +331,10 @@ def build_parser():
     p_preflight = sub.add_parser("preflight", parents=[get_global_parser()], help="Check local install/config readiness without contacting printer")
     p_preflight.add_argument("--strict", action="store_true", help="Treat warnings as failures")
 
+    p_config = sub.add_parser("config", parents=[get_global_parser()], help="Show the effective config (redacted) or validate it locally")
+    p_config.add_argument("action", choices=["show", "validate"], help="show: print config path and redacted contents; validate: run config checks")
+    p_config.add_argument("--strict", action="store_true", help="validate: treat warnings as failures")
+
     p_setup = sub.add_parser("setup", parents=[get_global_parser()], help="Guided or non-interactive setup to discover printer and create config")
     p_setup.add_argument("--printer-ip", help="Printer IP address or hostname for non-interactive setup")
     p_setup.add_argument("--serial", help="Printer serial number for non-interactive setup")

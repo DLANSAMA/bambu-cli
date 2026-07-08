@@ -26,6 +26,12 @@ from bambu_cli.setup_cmd.common import (  # noqa: F401
     _validate_setup_access_code_file,
     _write_setup_config,
 )
+from bambu_cli.setup_cmd.config_cmd import (  # noqa: F401
+    _cmd_config,
+    _cmd_config_show,
+    _cmd_config_validate,
+    _redacted_config,
+)
 from bambu_cli.setup_cmd.migrate import (  # noqa: F401
     _cmd_migrate_access_code,
     migrate_access_code,

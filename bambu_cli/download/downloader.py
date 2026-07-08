@@ -45,11 +45,6 @@ from bambu_cli.printables import _is_printables_model_url
 from bambu_cli.protocols.ftps import _download_partial_path, _remove_partial_file
 from bambu_cli.utils import _ensure_output_dir, _record_download_success, emit_json_error
 
-# build_safe_opener, resolve_printables_url, and _noncolliding_path are called
-# through the package namespace (not bound here) so existing test patches on
-# ``bambu_cli.download.<name>`` keep working after the package split.
-from bambu_cli import download as _download_pkg  # isort: skip
-
 
 def _response_header(resp, name):
     value = resp.getheader(name)
@@ -70,6 +65,12 @@ def _response_url(resp):
 
 def _cmd_download(args):
     """Download a model or printer-ready file from a URL. Auto-resolves Printables page URLs."""
+    # build_safe_opener, resolve_printables_url, and _noncolliding_path are
+    # called through the package namespace (imported here, not at module
+    # level, to avoid touching the partially-initialized package during
+    # import) so existing test patches on ``bambu_cli.download.<name>`` keep
+    # working after the package split.
+    from bambu_cli import download as _download_pkg
     from bambu_cli import utils
     utils._LAST_DOWNLOAD_PAYLOAD = None
     source_url = args.url

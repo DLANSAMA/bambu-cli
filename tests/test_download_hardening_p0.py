@@ -1,4 +1,4 @@
-"""P0 hardening regression tests for bambu_cli/download.py.
+"""P0 hardening regression tests for the bambu_cli.download package.
 
 Covers gaps documented in docs/test-backlog.md P3: redirect revalidation
 (SSRF + extension), explicit redirect hop cap, mid-stream size enforcement,

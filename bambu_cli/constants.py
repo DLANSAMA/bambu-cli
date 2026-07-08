@@ -74,5 +74,5 @@ PRINTER_CONFIG_COMMANDS = {
     "status", "light", "pause", "resume", "stop", "upload", "files",
     "print", "job", "send", "delete", "snapshot", "gcode", "doctor",
 }
-LOCAL_COMMANDS = {"slice", "download", "preflight", "setup"}
+LOCAL_COMMANDS = {"slice", "download", "preflight", "setup", "config"}
 PRINTER_NETWORK_COMMANDS = PRINTER_CONFIG_COMMANDS - LOCAL_COMMANDS

@@ -1,7 +1,7 @@
 """SSRF-safe HTTP layer: safe opener construction, per-hop IP validation,
 DNS caching, and redirect hop limiting. No dependency on Printables/model
 selection logic — this module is purely network-safety plumbing shared by
-download.py and printables.py."""
+the download package and printables.py."""
 import functools
 import http.client
 import ipaddress

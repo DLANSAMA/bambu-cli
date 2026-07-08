@@ -9,8 +9,9 @@ class TestLoadConfig(unittest.TestCase):
     @patch('os.path.exists')
     @patch('os.path.getsize')
     def test_cmd_slice_convert_step_to_stl_argument_injection(self, mock_getsize, mock_exists, mock_logger, mock_run):
-        from bambu_cli.bambu import _convert_step_to_stl
         import os
+
+        from bambu_cli.bambu import _convert_step_to_stl
 
         # Setup mocks
         mock_run.return_value.returncode = 0
@@ -194,6 +195,79 @@ class TestSetupLogging(unittest.TestCase):
                 bambu_cli_module.setup_logging(verbose=True)
                 mock_logger.setLevel.assert_called_once_with(mock_logging.DEBUG)
                 self.assertFalse(mock_logger.propagate)
+
+
+class TestCmdConfig(unittest.TestCase):
+    """`config show` / `config validate` (bambu_cli.setup_cmd.config_cmd)."""
+
+    def _args(self, action, json_mode=False, strict=False):
+        import argparse
+        return argparse.Namespace(cmd="config", action=action, json=json_mode, strict=strict)
+
+    def test_config_show_redacts_access_code(self):
+        import contextlib
+
+        from bambu_cli.setup_cmd.config_cmd import _cmd_config
+        stdout = io.StringIO()
+        with patch("bambu_cli.setup_cmd.config_cmd.logger"), contextlib.redirect_stdout(stdout):
+            _cmd_config(self._args("show"))
+        printed = stdout.getvalue()
+        self.assertIn("<redacted>", printed)
+        self.assertNotIn("MOCK_CODE", printed)  # base config's inline access_code
+        self.assertIn("MOCK_SERIAL", printed)
+
+    def test_config_show_json_payload(self):
+        from bambu_cli.setup_cmd.config_cmd import _cmd_config
+        with patch("bambu_cli.setup_cmd.config_cmd.emit_json") as mock_emit:
+            _cmd_config(self._args("show", json_mode=True))
+        payload = mock_emit.call_args[0][0]
+        self.assertEqual(payload["command"], "config")
+        self.assertEqual(payload["action"], "show")
+        self.assertEqual(payload["config"]["access_code"], "<redacted>")
+        self.assertNotIn("MOCK_CODE", json.dumps(payload))
+
+    def test_config_show_missing_config_exits(self):
+        from bambu_cli.setup_cmd.config_cmd import _cmd_config
+        with patch("bambu_cli.setup_cmd.config_cmd._config_path", return_value="/nonexistent/config.json"), \
+             patch("bambu_cli.setup_cmd.config_cmd.logger") as mock_logger, self.assertRaises(SystemExit) as cm:
+            _cmd_config(self._args("show"))
+        self.assertEqual(cm.exception.code, 1)
+        self.assertTrue(any("Config not found" in call[0][0] for call in mock_logger.error.call_args_list))
+
+    def test_config_validate_filters_to_config_checks(self):
+        from bambu_cli.setup_cmd.config_cmd import _cmd_config
+        checks = [
+            {"status": "ok", "name": "python", "message": "irrelevant install check"},
+            {"status": "ok", "name": "printer-ip", "message": "Printer address is configured."},
+            {"status": "warning", "name": "access-code", "message": "inline access_code"},
+            {"status": "warning", "name": "gmsh", "message": "irrelevant install warning"},
+        ]
+        with patch("bambu_cli.setup_cmd.config_cmd.collect_preflight_checks", return_value=checks), \
+             patch("bambu_cli.setup_cmd.config_cmd.emit_json") as mock_emit:
+            _cmd_config(self._args("validate", json_mode=True))
+        payload = mock_emit.call_args[0][0]
+        self.assertEqual(payload["action"], "validate")
+        self.assertEqual({c["name"] for c in payload["checks"]}, {"printer-ip", "access-code"})
+        # Warnings without --strict still validate (same semantics as preflight).
+        self.assertEqual(payload["status"], "ok")
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["warnings"], 1)
+
+    def test_config_validate_strict_fails_on_warnings(self):
+        from bambu_cli.setup_cmd.config_cmd import _cmd_config
+        checks = [{"status": "warning", "name": "access-code", "message": "inline access_code"}]
+        with patch("bambu_cli.setup_cmd.config_cmd.collect_preflight_checks", return_value=checks), \
+             patch("bambu_cli.setup_cmd.config_cmd.logger"), self.assertRaises(SystemExit) as cm:
+            _cmd_config(self._args("validate", strict=True))
+        self.assertEqual(cm.exception.code, 1)
+
+    def test_config_validate_errors_exit(self):
+        from bambu_cli.setup_cmd.config_cmd import _cmd_config
+        checks = [{"status": "error", "name": "serial", "message": "Config must contain the printer serial number."}]
+        with patch("bambu_cli.setup_cmd.config_cmd.collect_preflight_checks", return_value=checks), \
+             patch("bambu_cli.setup_cmd.config_cmd.logger"), self.assertRaises(SystemExit) as cm:
+            _cmd_config(self._args("validate"))
+        self.assertEqual(cm.exception.code, 1)
 
 
 if __name__ == '__main__':

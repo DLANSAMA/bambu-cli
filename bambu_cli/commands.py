@@ -575,6 +575,11 @@ def cmd_preflight(args):
     from bambu_cli import bambu
     bambu._cmd_preflight(args)
 
+def cmd_config(args):
+    """Show the effective config (redacted) or validate it locally."""
+    from bambu_cli import bambu
+    bambu._cmd_config(args)
+
 def cmd_job(args):
     """One-shot URL/local file workflow: download, slice, upload, optionally print."""
     from bambu_cli import bambu

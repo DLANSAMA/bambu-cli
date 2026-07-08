@@ -23,9 +23,9 @@ holds config-derived runtime state (`SIMULATION_MODE`, `PRINTER_IP`, ...) and
 re-exports every helper as a stable compatibility facade for tests and scripts.
 - `cli.py` — argparse setup, `main()` dispatch, path/JSON message helpers
 - `commands.py` — printer subcommand handlers (status, upload, print, doctor, ...)
-- `download.py` — SSRF-safe HTTP, URL/filename validation, ZIP extraction, Printables GraphQL
+- `download/` — package: URL/filename validation, HTML link scraping, ZIP extraction, the `download` command
 - `job.py` — one-shot `job`/`send` orchestration, dry-run prediction, print payloads
-- `setup_cmd.py` — guided/non-interactive setup, mDNS discovery, preflight checks
+- `setup_cmd/` — package: guided/non-interactive setup, mDNS discovery, config show/validate, preflight
 - `camera.py` — snapshot capture (direct port-6000 grab + Docker streamer fallback)
 - `slicer.py` — OrcaSlicer integration; `config.py` — config load/apply, timeouts
 - `constants.py` — exit codes, file-type tables, safety limits (immutable)

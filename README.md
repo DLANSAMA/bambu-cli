@@ -42,6 +42,13 @@ Use the interactive `setup` command to create your config securely:
 bambu-cli setup
 ```
 
+Inspect or check the resulting config at any time:
+
+```bash
+bambu-cli config show       # print config path + contents (access code redacted)
+bambu-cli config validate   # check config values without contacting the printer
+```
+
 ## Usage
 
 ```bash
