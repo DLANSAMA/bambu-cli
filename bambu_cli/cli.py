@@ -522,15 +522,19 @@ def main():
         setup_logging(verbose_val, json_mode=json_mode_val)
     else:
         setup_logging(verbose_val)
-    bambu.SIMULATION_MODE = bool(getattr(args, "sim", False))
-    if bambu.SIMULATION_MODE:
+    simulation = bool(getattr(args, "sim", False))
+    if simulation:
         logger.info("🤖 Simulation mode enabled.")
 
     bambu.load_config(exit_on_fail=False)
 
+    # load_config installs a RuntimeContext from the parsed config; layer the
+    # request-scoped flags (simulation / json output) onto it.
     from bambu_cli import context as _context
 
-    _context.set_current(_context.RuntimeContext.from_globals(args))
+    _ctx = _context.get_current()
+    _ctx.simulation = simulation
+    _ctx.json_mode = _json_mode_requested(args)
 
     if _json_setup_should_be_noninteractive(args):
         bambu._cmd_setup_noninteractive(args)
@@ -538,15 +542,16 @@ def main():
 
     # Global settings validation
     if _requires_printer_dns_check(args):
-        if bambu.PRINTER_IP == "0.0.0.0":
+        printer_ip = _context.current_settings().printer_ip
+        if printer_ip == "0.0.0.0":
             message = "Printer IP is not configured. Please run setup first."
             logger.error(message)
             emit_json_error(args, args.cmd or "main", EXIT_CONFIG_ERROR, message, failed_step="config")
             sys.exit(EXIT_CONFIG_ERROR)
         try:
-            socket.getaddrinfo(bambu.PRINTER_IP, None)
+            socket.getaddrinfo(printer_ip, None)
         except socket.gaierror:
-            message = f"Invalid printer_ip or hostname in config: {bambu.PRINTER_IP}"
+            message = f"Invalid printer_ip or hostname in config: {printer_ip}"
             logger.error(message)
             emit_json_error(args, args.cmd or "main", EXIT_CONFIG_ERROR, message, failed_step="config")
             sys.exit(EXIT_CONFIG_ERROR)

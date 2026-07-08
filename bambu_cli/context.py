@@ -1,19 +1,20 @@
 """Typed runtime context for command handlers.
 
 ``Settings.from_config`` is the canonical config parse: ``apply_config``
-builds a Settings and mirrors it onto the ``bambu.<NAME>`` module globals,
-which remain only as a write-through compatibility layer for tests and
-legacy callers. Handlers take per-call snapshots via
-``RuntimeContext.from_globals(args)`` / ``Settings.from_globals()`` so test
-patches on the globals are still honored. Do not add new module globals;
-add fields here instead.
+builds a ``RuntimeContext`` and installs it via ``set_current`` as the single
+source of truth. Handlers read it through ``current_settings()`` /
+``current_config()`` / ``current_simulation()``. There are no config-derived
+module globals anymore — add fields to ``Settings`` here instead.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from bambu_cli.printer import BambuPrinter
 
 
 def _normalize_fingerprint(fp: str | None) -> str | None:
@@ -30,12 +31,12 @@ def _normalize_fingerprint(fp: str | None) -> str | None:
 class Settings:
     """Typed snapshot of the printer/runtime configuration.
 
-    Field defaults mirror the current module-global defaults in
-    ``bambu_cli/bambu.py``.
+    Field defaults are the values an empty config resolves to.
     """
 
     printer_ip: str = "0.0.0.0"
     serial: str = "UNKNOWN"
+    username: str = "bblp"
     mqtt_port: int = 8883
     insecure_tls: bool = False
     cert_fingerprint: str | None = None
@@ -79,6 +80,7 @@ class Settings:
         return cls(
             printer_ip=cfg.get("printer_ip", "0.0.0.0"),
             serial=cfg.get("serial", "UNKNOWN"),
+            username=cfg.get("username", "bblp"),
             mqtt_port=cfg.get("mqtt_port", 8883),
             insecure_tls=cfg.get("insecure_tls", False),
             cert_fingerprint=cfg.get("cert_fingerprint"),
@@ -93,47 +95,25 @@ class Settings:
             allow_private_ips=False,
         )
 
-    @classmethod
-    def from_globals(cls) -> Settings:
-        """Snapshot the current ``bambu.<NAME>`` module globals."""
-        from bambu_cli import bambu
-
-        return cls(
-            printer_ip=bambu.PRINTER_IP,
-            serial=bambu.SERIAL,
-            mqtt_port=bambu.MQTT_PORT,
-            insecure_tls=bambu.INSECURE_TLS,
-            cert_fingerprint=getattr(bambu, "_cfg", {}).get("cert_fingerprint")
-            if getattr(bambu, "_cfg", None)
-            else None,
-            orca_slicer=bambu.ORCA_SLICER,
-            profiles_dir=bambu.PROFILES_DIR,
-            printer_model=bambu.PRINTER_MODEL,
-            nozzle_size=bambu.NOZZLE_SIZE,
-            camera_image=bambu.CAMERA_IMAGE,
-            camera_container_name=bambu.CAMERA_CONTAINER_NAME,
-            camera_port=bambu.CAMERA_PORT,
-            camera_stream_url=bambu.CAMERA_STREAM_URL,
-            allow_private_ips=getattr(bambu, "ALLOW_PRIVATE_IPS", False),
-        )
-
 
 @dataclass
 class RuntimeContext:
     """Typed bundle of the state a command needs to run.
 
-    Compat note: the module globals on ``bambu_cli.bambu`` remain the source
-    of truth for now; this context is a snapshot/cache layer alongside them.
+    Installed via ``set_current`` (by ``main`` and by tests) and read back
+    through the ``current_*`` accessors below; it is the source of truth for
+    per-run configuration.
     """
 
     settings: Settings = field(default_factory=Settings)
+    config: dict[str, Any] = field(default_factory=dict)
     simulation: bool = False
     json_mode: bool = False
     config_path: Path | None = None
     last_error: dict | None = None
     _printer: Any = field(default=None, repr=False, compare=False)
 
-    def printer(self):
+    def printer(self) -> BambuPrinter:
         """Return a cached ``BambuPrinter`` built from ``self.settings``.
 
         Mirrors ``bambu_cli.printer.get_printer()``: empty access_code in
@@ -157,38 +137,56 @@ class RuntimeContext:
         return self._printer
 
     @classmethod
-    def from_globals(cls, args=None) -> RuntimeContext:
-        """Snapshot the current globals into a RuntimeContext."""
-        from bambu_cli import bambu
+    def for_request(cls, args: Any = None) -> RuntimeContext:
+        """Return the installed RuntimeContext for the current command.
 
-        json_mode = False
+        ``json_mode`` is refreshed from ``args`` when provided. Handlers use the
+        ``ctx = ctx or RuntimeContext.for_request(args)`` idiom so they work both
+        under ``main`` (which installs the context) and when called directly.
+        """
+        ctx = get_current()
         if args is not None:
             from bambu_cli.cli import _json_mode_requested
 
-            json_mode = _json_mode_requested(args)
-
-        return cls(
-            settings=Settings.from_globals(),
-            simulation=bool(getattr(bambu, "SIMULATION_MODE", False)),
-            json_mode=json_mode,
-        )
+            ctx.json_mode = _json_mode_requested(args)
+        return ctx
 
 
 _current: RuntimeContext | None = None
 
 
 def get_current() -> RuntimeContext:
-    """Return the current RuntimeContext, lazily building one from globals
-    if none has been set yet (so library/test callers that never ran
-    ``main()`` still work).
+    """Return the active RuntimeContext, installing a default one if none has
+    been set yet (so library/test callers that never ran ``main()`` still get
+    a usable, mutable context).
     """
     global _current
     if _current is None:
-        _current = RuntimeContext.from_globals()
+        _current = RuntimeContext()
     return _current
 
 
-def set_current(ctx: RuntimeContext) -> None:
-    """Set the process-wide current RuntimeContext."""
+def set_current(ctx: RuntimeContext | None) -> None:
+    """Set (or, with ``None``, clear) the process-wide current RuntimeContext."""
     global _current
     _current = ctx
+
+
+# --- Runtime config accessors ------------------------------------------------
+# The single funnel through which handlers read runtime config, backed by the
+# installed RuntimeContext (see get_current).
+
+
+def current_settings() -> Settings:
+    """Typed settings for the active run."""
+    return get_current().settings
+
+
+def current_config() -> dict[str, Any]:
+    """Raw config dict for the active run."""
+    return dict(get_current().config)
+
+
+def current_simulation() -> bool:
+    """Whether the active run is in simulation mode."""
+    return get_current().simulation

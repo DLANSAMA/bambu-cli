@@ -199,32 +199,30 @@ def apply_config(cfg):
     """Apply a configuration dictionary to the runtime state.
 
     The dict is parsed once into a typed :class:`bambu_cli.context.Settings`
-    (the canonical parse), which is then mirrored onto the ``bambu.<NAME>``
-    module globals so legacy readers and test patches keep working.
+    (the canonical parse) and installed on a fresh
+    :class:`bambu_cli.context.RuntimeContext` as the process-wide source of
+    truth. Request-scoped flags (simulation/json_mode) already on the current
+    context are preserved.
     """
-    from bambu_cli import bambu
-    from bambu_cli.context import Settings
+    from bambu_cli.context import RuntimeContext, Settings, get_current, set_current
 
     if not cfg:
         return
     settings = Settings.from_config(cfg)
-    bambu._cfg = cfg
-    bambu.PRINTER_IP = settings.printer_ip
-    bambu.SERIAL = settings.serial
-    bambu.MQTT_PORT = settings.mqtt_port
-    bambu.INSECURE_TLS = settings.insecure_tls
     if settings.insecure_tls:
         logger.warning(
             "🚨 SECURITY WARNING: 'insecure_tls' is enabled! TLS certificate validation is DISABLED for all connections. Your network traffic is vulnerable to MITM attacks."
         )
-    bambu.ORCA_SLICER = settings.orca_slicer
-    bambu.PROFILES_DIR = settings.profiles_dir
-    bambu.PRINTER_MODEL = settings.printer_model
-    bambu.NOZZLE_SIZE = settings.nozzle_size
-    bambu.CAMERA_IMAGE = settings.camera_image
-    bambu.CAMERA_CONTAINER_NAME = settings.camera_container_name
-    bambu.CAMERA_PORT = settings.camera_port
-    bambu.CAMERA_STREAM_URL = settings.camera_stream_url
+    prev = get_current()
+    set_current(
+        RuntimeContext(
+            settings=settings,
+            config=cfg,
+            simulation=prev.simulation,
+            json_mode=prev.json_mode,
+            config_path=prev.config_path,
+        )
+    )
 
 
 _INLINE_ACCESS_CODE_WARNED = False
@@ -249,21 +247,22 @@ def _warn_inline_access_code_once():
 
 
 def load_access_code():
-    from bambu_cli import bambu
     from bambu_cli.cli import _display_path, _exception_for_message, _expand_path
     from bambu_cli.constants import EXIT_CONFIG_ERROR
+    from bambu_cli.context import current_config
 
-    if "access_code" in bambu._cfg:
-        if not bambu._cfg.get("access_code_file"):
+    cfg = current_config()
+    if "access_code" in cfg:
+        if not cfg.get("access_code_file"):
             _warn_inline_access_code_once()
-        access_code = str(bambu._cfg["access_code"]).strip()
+        access_code = str(cfg["access_code"]).strip()
         problem = _access_code_value_problem(access_code)
         if problem:
             logger.error(problem)
             sys.exit(EXIT_CONFIG_ERROR)
         return access_code
-    if "access_code_file" in bambu._cfg:
-        path = _expand_path(bambu._cfg["access_code_file"])
+    if "access_code_file" in cfg:
+        path = _expand_path(cfg["access_code_file"])
         try:
             with open(path, encoding="utf-8") as f:
                 access_code = f.read().strip()
@@ -295,16 +294,16 @@ def _access_code_value_problem(value):
 
 def load_username():
     """Return the MQTT username from config, defaulting to 'bblp'."""
-    from bambu_cli import bambu
+    from bambu_cli.context import current_settings
 
-    return bambu._cfg.get("username", "bblp")
+    return current_settings().username
 
 
 def _expected_fingerprint():
     """Return the normalized (lowercase, separator-free) pinned SHA-256, or None."""
-    from bambu_cli import bambu
+    from bambu_cli.context import current_config
 
-    fp = bambu._cfg.get("cert_fingerprint")
+    fp = current_config().get("cert_fingerprint")
     if not fp:
         return None
     return fp.lower().replace(":", "").replace(" ", "")
@@ -321,15 +320,16 @@ def fingerprint_sha256(der_cert):
 
 def _timeout_from(args, key, default):
     """Resolve a timeout from CLI args, then config, then the default."""
-    from bambu_cli import bambu
     from bambu_cli.cli import _namespace_get
+    from bambu_cli.context import current_config
 
     if args:
         val = _namespace_get(args, key)
         if val is not None:
             return float(val)
-    if bambu._cfg:
-        val = bambu._cfg.get(key)
+    cfg = current_config()
+    if cfg:
+        val = cfg.get(key)
         if val is not None:
             return float(val)
     return default
