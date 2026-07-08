@@ -3,6 +3,13 @@ from tests.bambu_test_base import *  # noqa: F401,F403
 
 class TestMain(unittest.TestCase):
 
+    def tearDown(self):
+        # main() installs a process-wide RuntimeContext; clear it so it can't
+        # leak into later tests (the pytest suite does this via a conftest
+        # fixture, but the CI `unittest` line needs it here).
+        from bambu_cli import context
+        context.set_current(None)
+
     @patch('sys.argv', ['bambu.py', 'status'])
     @patch('bambu_cli.bambu.cmd_status')
     @patch('bambu_cli.bambu.setup_logging')

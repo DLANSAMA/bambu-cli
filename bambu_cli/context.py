@@ -195,28 +195,32 @@ def get_current() -> RuntimeContext:
     return _current
 
 
-def set_current(ctx: RuntimeContext) -> None:
-    """Set the process-wide current RuntimeContext."""
+def set_current(ctx: RuntimeContext | None) -> None:
+    """Set (or, with ``None``, clear) the process-wide current RuntimeContext."""
     global _current
     _current = ctx
 
 
-# --- Transition accessors (globals migration) -------------------------------
-# These are the single funnel through which handlers read runtime config during
-# the migration to a context source of truth. For now they read the still-live,
-# mirrored ``bambu.<NAME>`` globals fresh on every call, so patched globals are
-# honored and there is no singleton-caching leak between tests. At flag day
-# (Stage 4) their bodies flip to read the installed RuntimeContext and the
-# module globals are deleted — no caller changes required.
+# --- Runtime config accessors ------------------------------------------------
+# The single funnel through which handlers read runtime config. When a
+# RuntimeContext has been installed (``set_current`` — done by ``main`` and by
+# tests) it is authoritative. Otherwise these fall back to the still-mirrored
+# ``bambu.<NAME>`` module globals, which keeps un-migrated tests that patch the
+# globals working during the migration. At flag day (Stage 4) the globals are
+# deleted and the fallback branch goes with them.
 
 
 def current_settings() -> Settings:
     """Typed settings for the active run."""
+    if _current is not None:
+        return _current.settings
     return Settings.from_globals()
 
 
 def current_config() -> dict[str, Any]:
     """Raw config dict for the active run."""
+    if _current is not None:
+        return dict(_current.config)
     from bambu_cli import bambu
 
     return dict(getattr(bambu, "_cfg", None) or {})
@@ -224,6 +228,8 @@ def current_config() -> dict[str, Any]:
 
 def current_simulation() -> bool:
     """Whether the active run is in simulation mode."""
+    if _current is not None:
+        return _current.simulation
     from bambu_cli import bambu
 
     return bool(getattr(bambu, "SIMULATION_MODE", False))
