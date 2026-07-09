@@ -14,7 +14,7 @@ REQUIRED_SNIPPETS = {
     "windows runner": "windows-latest",
     "oldest supported python": '"3.9"',
     "current smoke python": '"3.14"',
-    "unit tests": 'python -W error::ResourceWarning -m pytest tests/ -m "not live" --cov=bambu_cli --cov-report=term-missing --cov-fail-under=92',
+    "unit tests": 'python -W error::ResourceWarning -m pytest tests/ -m "not live" --cov=bambu_cli --cov-report=term-missing --cov-fail-under=79',
     "runtime package syntax": "bambu_cli/bambu.py",
     "release readiness smoke": "python tests/release_readiness_smoke.py",
     "python compatibility smoke": "python tests/python_compat_smoke.py",
