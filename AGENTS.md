@@ -63,3 +63,15 @@ Agents may place `--json` before or after the subcommand; `bambu-cli --json --ve
 Published on PyPI as `bambu-local-cli`; the installed command is `bambu-cli`.
 Wheels contain runtime code only — do not add docs or requirements files to
 package-data (tests/package_contents_smoke.py enforces this).
+
+## Quality gates (agents)
+
+- **Default tests:** `uv run python -m pytest tests/ -q -m "not live"` — never
+  contacts a printer.
+- **Mutation baseline** (safety pure modules): `./scripts/run_mutation_baseline.sh`
+  — not a per-PR job; nightly / `workflow_dispatch` only. Scope, score floor, and
+  surviving mutants: [docs/mutation-baseline.md](docs/mutation-baseline.md).
+- **Live-printer pre-release smoke** (opt-in): requires `BAMBU_LIVE=1`, a real
+  config, and `BAMBU_LIVE_SOURCE`. Marked `@pytest.mark.live`. Full procedure and
+  safety notes: [docs/live-printer-smoke.md](docs/live-printer-smoke.md). Always
+  ask the user before any run with `--confirm` or `BAMBU_LIVE_PRINT_CONFIRM`.

@@ -16,7 +16,9 @@ ROOT = Path(__file__).resolve().parents[1]
 BASE_EXCLUDED_DIRS = {
     ".claude",
     ".git",
+    ".hypothesis",
     ".mypy_cache",
+    ".mutmut-cache",
     ".pytest_cache",
     ".ruff_cache",
     ".venv",
@@ -24,6 +26,7 @@ BASE_EXCLUDED_DIRS = {
     "bambu_cli.egg-info",
     "build",
     "dist",
+    "mutants",
     "wheelhouse",
 }
 
