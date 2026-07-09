@@ -112,8 +112,8 @@ def test_cmd_gcode_success():
     printer = MagicMock()
     printer.send_command.return_value = True
     with (
-        patch("bambu_cli.commands.RuntimeContext.for_request") as fr,
-        patch("bambu_cli.commands.get_sequence_id", return_value="9"),
+        patch("bambu_cli.commands.gcode.RuntimeContext.for_request") as fr,
+        patch("bambu_cli.commands.gcode.get_sequence_id", return_value="9"),
     ):
         ctx = MagicMock()
         ctx.printer.return_value = printer

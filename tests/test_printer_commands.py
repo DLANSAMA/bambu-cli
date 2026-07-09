@@ -159,7 +159,7 @@ class TestBambuCmdUploadEdgeCases(unittest.TestCase):
 
 
 class TestBambuCmdLight(unittest.TestCase):
-    @patch("bambu_cli.commands.get_sequence_id", return_value="0")
+    @patch("bambu_cli.commands.device.get_sequence_id", return_value="0")
     @patch("bambu_cli.protocols.mqtt.send_command")
     @patch("bambu_cli.logging_utils._BACKEND")
     def test_cmd_light_on(self, mock_logger, mock_send_command, mock_seq):
@@ -185,7 +185,7 @@ class TestBambuCmdLight(unittest.TestCase):
         mock_send_command.assert_called_once_with(ANY, expected_payload, timeout=None, retries=2)
         mock_logger.info.assert_called_once_with("💡 Light turned on")
 
-    @patch("bambu_cli.commands.get_sequence_id", return_value="0")
+    @patch("bambu_cli.commands.device.get_sequence_id", return_value="0")
     @patch("bambu_cli.protocols.mqtt.send_command")
     @patch("bambu_cli.logging_utils._BACKEND")
     def test_cmd_light_off(self, mock_logger, mock_send_command, mock_seq):
@@ -213,7 +213,7 @@ class TestBambuCmdLight(unittest.TestCase):
 
 
 class TestBambuCmdResume(unittest.TestCase):
-    @patch("bambu_cli.commands.get_sequence_id", return_value="0")
+    @patch("bambu_cli.commands.device.get_sequence_id", return_value="0")
     @patch("bambu_cli.protocols.mqtt.send_command")
     @patch("bambu_cli.logging_utils._BACKEND")
     def test_cmd_resume(self, mock_logger, mock_send_command, mock_seq):
@@ -229,7 +229,7 @@ class TestBambuCmdResume(unittest.TestCase):
 
 
 class TestBambuCmdPause(unittest.TestCase):
-    @patch("bambu_cli.commands.get_sequence_id", return_value="0")
+    @patch("bambu_cli.commands.device.get_sequence_id", return_value="0")
     @patch("bambu_cli.protocols.mqtt.send_command")
     @patch("bambu_cli.logging_utils._BACKEND")
     def test_cmd_pause(self, mock_logger, mock_send_command, mock_seq):
@@ -456,7 +456,7 @@ class TestBambuCmdGcode(unittest.TestCase):
 
         self.assertEqual(getattr(cm.exception, "exit_code", getattr(cm.exception, "code", None)), 2)
 
-    @patch("bambu_cli.commands.get_sequence_id", return_value="0")
+    @patch("bambu_cli.commands.gcode.get_sequence_id", return_value="0")
     @patch("bambu_cli.protocols.mqtt.send_command")
     def test_cmd_gcode(self, mock_send_command, mock_seq):
         from bambu_cli.commands import cmd_gcode
@@ -495,7 +495,7 @@ class TestBambuCmdGcode(unittest.TestCase):
         mock_send.assert_not_called()
         self.assertTrue(any("Add --confirm to proceed" in str(call) for call in mock_logger.warning.call_args_list))
 
-    @patch("bambu_cli.commands.get_sequence_id", return_value="0")
+    @patch("bambu_cli.commands.gcode.get_sequence_id", return_value="0")
     @patch("bambu_cli.protocols.mqtt.send_command")
     def test_cmd_gcode_with_confirm_sends(self, mock_send, mock_seq):
         from bambu_cli.commands import cmd_gcode
@@ -583,9 +583,9 @@ class TestBambuGetStatus(unittest.TestCase):
         self.assertEqual(cm.exception.exit_code, 2)
         self.assertEqual(cm.exception.failed_step, "mqtt")
 
-    @patch("bambu_cli.utils.emit_json")
+    @patch("bambu_cli.commands.status.emit_json")
     @patch("bambu_cli.protocols.mqtt.get_status")
-    @patch("bambu_cli.commands.logger")
+    @patch("bambu_cli.logging_utils._BACKEND")
     def test_cmd_status_json_output(self, mock_logger, mock_get_status, mock_emit_json):
         from bambu_cli.commands import cmd_status
 
@@ -963,7 +963,7 @@ class TestBambuCmdPrint(unittest.TestCase):
             )
         )
 
-    @patch("bambu_cli.commands.generate_print_payload")
+    @patch("bambu_cli.commands.print_cmd.generate_print_payload")
     @patch("bambu_cli.protocols.mqtt.execute_print_command")
     def test_cmd_print_with_confirm(self, mock_execute, mock_generate):
         from bambu_cli.commands import cmd_print

@@ -3,9 +3,9 @@ from bambu_cli.errors import BambuError
 
 
 class TestBambuDoctor(unittest.TestCase):
-    @patch("bambu_cli.commands.load_config")
+    @patch("bambu_cli.commands.doctor.load_config")
     @patch("sys.exit")
-    @patch("bambu_cli.commands.logger")
+    @patch("bambu_cli.logging_utils._BACKEND")
     def test_cmd_doctor_config_load_fail(self, mock_logger, mock_exit, mock_load):
         from bambu_cli.commands import cmd_doctor
         from bambu_cli.errors import ConfigError
@@ -18,10 +18,10 @@ class TestBambuDoctor(unittest.TestCase):
         self.assertEqual(cm.exception.exit_code, 1)
         mock_logger.error.assert_any_call("   ❌ Config check failed.")
 
-    @patch("bambu_cli.commands.load_config")
+    @patch("bambu_cli.commands.doctor.load_config")
     @patch("bambu_cli.protocols.mqtt.get_status")
     @patch("sys.exit")
-    @patch("bambu_cli.commands.logger")
+    @patch("bambu_cli.logging_utils._BACKEND")
     def test_cmd_doctor_mqtt_fail(self, mock_logger, mock_exit, mock_get_status, mock_load):
         from bambu_cli.commands import cmd_doctor
         from bambu_cli.context import current_settings
@@ -38,11 +38,11 @@ class TestBambuDoctor(unittest.TestCase):
             f"   ❌ MQTT connection failed. Ensure printer at {current_settings().printer_ip} is on and access code is correct."
         )
 
-    @patch("bambu_cli.commands.load_config")
+    @patch("bambu_cli.commands.doctor.load_config")
     @patch("bambu_cli.protocols.mqtt.get_status")
     @patch("bambu_cli.protocols.ftps.get_ftp")
     @patch("sys.exit")
-    @patch("bambu_cli.commands.logger")
+    @patch("bambu_cli.logging_utils._BACKEND")
     def test_cmd_doctor_ftps_fail(self, mock_logger, mock_exit, mock_get_ftp, mock_get_status, mock_load):
         from bambu_cli.commands import cmd_doctor
 
@@ -60,7 +60,7 @@ class TestBambuDoctor(unittest.TestCase):
 
     @patch("bambu_cli.protocols.mqtt.get_status")
     @patch("bambu_cli.protocols.ftps.get_ftp")
-    @patch("bambu_cli.commands.logger")
+    @patch("bambu_cli.logging_utils._BACKEND")
     @patch("builtins.open")
     def test_cmd_doctor_success(self, mock_file_open, mock_logger, mock_get_ftp, mock_get_status):
         from bambu_cli.commands import cmd_doctor
@@ -196,7 +196,7 @@ class TestBambuSimulation(unittest.TestCase):
         # Enable sim mode via the runtime context for the test
         with (
             settings_ctx(simulation=True),
-            patch("bambu_cli.commands.logger", mock_logger),
+            patch("bambu_cli.commands.status.logger", mock_logger),
             patch("bambu_cli.protocols.mqtt.logger", mock_logger),
         ):
             cmd_status(args)
@@ -206,7 +206,7 @@ class TestBambuSimulation(unittest.TestCase):
             self.assertTrue(any("State: IDLE" in call[0][0] for call in mock_logger.info.call_args_list))
 
     @patch("bambu_cli.logging_utils.logger")
-    @patch("bambu_cli.commands.logger")
+    @patch("bambu_cli.logging_utils._BACKEND")
     def test_simulation_mode_upload(self, mock_commands_logger, mock_ftps_logger):
         from bambu_cli.commands import cmd_upload
         import bambu_cli.bambu as bambu

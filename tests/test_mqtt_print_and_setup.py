@@ -269,7 +269,7 @@ def test_cmd_light_failure_raises():
     args = Namespace(action="on", json=False)
     printer = MagicMock()
     printer.send_command.return_value = False
-    with patch("bambu_cli.commands.RuntimeContext.for_request") as fr:
+    with patch("bambu_cli.commands.device.RuntimeContext.for_request") as fr:
         ctx = MagicMock()
         ctx.printer.return_value = printer
         fr.return_value = ctx
@@ -416,8 +416,8 @@ def test_cmd_pause_success(capsys):
     printer = MagicMock()
     printer.send_command.return_value = True
     with (
-        patch("bambu_cli.commands.RuntimeContext.for_request") as fr,
-        patch("bambu_cli.commands.get_sequence_id", return_value="1"),
+        patch("bambu_cli.commands.device.RuntimeContext.for_request") as fr,
+        patch("bambu_cli.commands.device.get_sequence_id", return_value="1"),
     ):
         ctx = MagicMock()
         ctx.printer.return_value = printer
