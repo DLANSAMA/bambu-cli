@@ -20,18 +20,20 @@ Agents interacting directly with the codebase should instantiate this class via 
 - Network operations (like MQTT request-response) support `timeout` and `retries` out of the box through `printer.send_command()` and `printer.status()`.
 
 ### Module layout
-Logic lives in focused modules; `bambu_cli/bambu.py` is a **thin entrypoint**
+Logic lives in focused packages/modules; `bambu_cli/bambu.py` is a **thin entrypoint**
 (console script + `main` re-export only — no `__getattr__` facade). Prefer
 injecting collaborators (`ctx.printer()`, keyword factory params with real
 defaults) over patching module globals. Tests must not patch `bambu_cli.bambu.*`
-for implementation symbols.
+for implementation symbols. Package `__init__.py` re-exports are for stable
+imports (as with `download/` / `setup_cmd/`), **not** mock targets.
 - `cli.py` — argparse setup, `main()` dispatch, path/JSON message helpers
-- `commands.py` — printer subcommand handlers (status, upload, print, doctor, ...)
-- `download/` — package: URL/filename validation, HTML link scraping, ZIP extraction, the `download` command. Collaborators (`opener_factory`, `resolve_printables`, `noncolliding_path`) are injectable on `_cmd_download` / `cmd_download`
-- `job.py` — one-shot `job`/`send` orchestration, dry-run prediction, print payloads (`JobSteps` injects step callables)
-- `setup_cmd/` — package: guided/non-interactive setup, mDNS discovery, config show/validate, preflight
+- `commands/` — printer subcommand handlers by family (`status`, `device`, `files`, `print_cmd`, `doctor`, `gcode`, thin `setup_wrappers`)
+- `download/` — URL/filename validation, HTML link scraping, ZIP extraction, the `download` command. Collaborators (`opener_factory`, `resolve_printables`, `noncolliding_path`) are injectable
+- `job/` — one-shot `job`/`send` orchestration (`orchestrate`), dry-run prediction (`predict`), print payloads (`payload`), injectable `JobSteps` (`steps`)
+- `setup_cmd/` — guided/non-interactive setup, mDNS discovery, config show/validate, preflight
 - `camera.py` — snapshot capture (injectable grab_frame / docker runners)
-- `slicer.py` — OrcaSlicer integration; `config.py` — config load/apply, timeouts
+- `slicer/` — OrcaSlicer integration (`options`, `profiles`, `step_convert`, `orca`, `output`, `cmd`)
+- `config.py` — config load/apply, timeouts
 - `logging_utils.py` — process logger proxy; tests use `set_logger` / patch `_BACKEND`
 - `constants.py` — exit codes, file-type tables, safety limits (immutable)
 - `protocols/` — low-level FTPS and MQTT clients used by `BambuPrinter`
@@ -41,7 +43,7 @@ CLI help smoke auto-discover modules/commands (`scripts/syntax_smoke.py`,
 `scripts/cli_help_smoke.py`). Adding a module under `bambu_cli/` or a subcommand
 in `cli.py` is enough — no triplicated lists.
 
-New command logic goes in `commands.py` (or a new focused module) using
+New command logic goes in `commands/` (or a new focused package) using
 `get_printer()` / `RuntimeContext` and injectable collaborators.
 
 When adding tests, follow the conventions and prioritized gap list in
