@@ -1,5 +1,4 @@
 name: CI
-# typing PR touch
 
 # push is limited to master so PR branches don't run everything twice
 # (once for the push, once for the pull_request event).
