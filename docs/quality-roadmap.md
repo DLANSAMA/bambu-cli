@@ -35,9 +35,9 @@ Baselines from audit + full `pytest --cov=bambu_cli` on 2026-07-08:
 
 Updated 2026-07-09 — corrected against measured reality (the prior "A+ across the
 board" entry overstated coverage, typing, and schema completeness; see the
-per-row evidence below). Foundational phases (0/A/B) are genuinely done; Phase C
-(coverage + typing) and Phase D (schemas) are **partially complete** — this is the
-remaining "Phase 3" work referenced in the `[tool.mypy]` exclude comment.
+per-row evidence below). Foundational phases (0/A/B) are done. Phase C **typing is
+done** (full package + `check_untyped_defs`); coverage floor is **81** (target 92).
+Phase D schemas largely landed. Remaining 1.0 A+ gap is mainly coverage ratchet.
 
 | Area | Score | Evidence |
 |------|-------|----------|
