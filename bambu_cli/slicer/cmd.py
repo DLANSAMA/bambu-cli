@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import subprocess
 
 from bambu_cli.cli import _display_path, _exception_for_message, _expand_path, _namespace_get, _path_for_message
@@ -379,13 +380,9 @@ def cmd_slice(
                 except OSError:
                     pass
         if step_converted and filepath and os.path.exists(filepath):
-            try:
-                os.unlink(filepath)
-            except OSError:
-                pass
-            try:
-                os.rmdir(os.path.dirname(filepath))
-            except OSError:
-                pass
+            # filepath here is always the bambu_step_* tmpdir's converted STL (see
+            # _convert_step_to_stl); rmtree the whole tmpdir so leftover gmsh artifacts
+            # don't cause a leak the way a bare os.rmdir(empty-dir-only) would.
+            shutil.rmtree(os.path.dirname(filepath), ignore_errors=True)
 
     return _finalize_slice(result, outpath, args, filepath, step_converted)

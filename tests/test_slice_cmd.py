@@ -321,6 +321,39 @@ class TestConvertStepToStl(unittest.TestCase):
         self.assertIsNone(stl_path)
         mock_logger.error.assert_called_with("STEP conversion failed. Please install gmsh for your platform.")
 
+    def test_convert_step_to_stl_removes_tmpdir_with_leftover_file(self):
+        """Regression: a bambu_step_* tmpdir must be fully removed even when gmsh
+        leaves an extra artifact behind (which would make a bare os.rmdir fail and
+        silently leak the directory)."""
+        from bambu_cli.slicer import _convert_step_to_stl
+
+        captured = {}
+
+        def fake_run(cmd_args, **kwargs):
+            out_idx = cmd_args.index("-o") + 1
+            stl_path = cmd_args[out_idx]
+            tmpdir = os.path.dirname(stl_path)
+            captured["tmpdir"] = tmpdir
+            # Simulate gmsh leaving a leftover artifact behind without producing the STL.
+            with open(os.path.join(tmpdir, "gmsh-leftover.log"), "w") as fh:
+                fh.write("leftover artifact")
+            mock_conv = MagicMock()
+            mock_conv.returncode = 1
+            mock_conv.stdout = ""
+            mock_conv.stderr = ""
+            return mock_conv
+
+        with patch("bambu_cli.slicer.step_convert.subprocess.run", side_effect=fake_run):
+            stl_path, success = _convert_step_to_stl("test.step")
+
+        self.assertFalse(success)
+        self.assertIsNone(stl_path)
+        self.assertIn("tmpdir", captured)
+        self.assertFalse(
+            os.path.exists(captured["tmpdir"]),
+            "tmpdir with a leftover artifact must be fully removed, not just left behind",
+        )
+
 
 class TestBambuCmdSliceEdgeCases(unittest.TestCase):
     def setUp(self):
