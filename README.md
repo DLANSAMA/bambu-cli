@@ -108,6 +108,8 @@ plate config validate   # check config values without contacting the printer
 plate doctor            # connectivity + live cert fingerprint
 ```
 
+![plate doctor: config, MQTT, and FTPS health checks with TLS-pin verification against a real printer](docs/doctor.gif)
+
 ### OrcaSlicer
 
 Slicing shells out to OrcaSlicer, so `plate` needs to know where its binary
